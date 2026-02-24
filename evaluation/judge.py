@@ -3,7 +3,7 @@ import json
 import pandas as pd
 import re
 from sympy import simplify
-from math_evaluation import is_equiv
+from training.verl.utils.reward_score.prime_math.grader import grade_answer as is_equiv
 import os
 import json
 import threading 
