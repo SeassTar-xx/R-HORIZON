@@ -25,25 +25,28 @@ def do_post(url, data, headers, model_name):
 
 
 def request_response(key, messages, config):
-    if 'params' in config:
-        request_params = config['params'].copy()
-    else:
-        request_params = {}
-    if isinstance(messages, list):
-        request_params['messages'] = messages
-    else:
-        request_params['prompt'] = messages
-    request_params['model'] = config['model_name']
+    # 复制默认参数
+    request_params = config.get('params', {}).copy()
+    #  统一转成 chat 格式
+    if isinstance(messages, str):
+        messages = [{"role": "user", "content": messages}]
+    request_params["model"] = config["model_name"]
+    request_params["messages"] = messages
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {config['api_key']}"
     }
-    url = config['base_url']
-    resp = do_post(url, request_params, headers, config['model_name'])
-    text = extract_content(resp)
+    url = config["base_url"]
+    # 发送请求
+    resp = do_post(url, request_params, headers, config["model_name"])
+    # 统一解析 chat 返回格式
+    try:
+        text = resp["choices"][0]["message"].get("content", "")
+    except Exception as e:
+        raise Exception(f"Invalid response format: {resp}")
     return {
-        "key" : key, 
-        "response"  : text
+        "key": key,
+        "response": text
     }
 
 

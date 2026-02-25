@@ -118,7 +118,12 @@ def judge_multiquery_answer(key, extract_data, gold):
     cnt_valid, cnt_acc_all, cnt_acc_last, cnt_error = 0, 0, 0, 0
 
     try:
-        extract_data = json.loads(extract_data)
+        # 提取 JSON 部分
+        match = re.search(r'\{.*\}', extract_data, re.DOTALL)
+        if match:
+            extract_data = json.loads(match.group())
+        else:
+            extract_data = {}
     except Exception as e:
         extract_data = {}
 
