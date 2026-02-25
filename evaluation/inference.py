@@ -36,19 +36,22 @@ def request_response(key, messages, config):
         request_params = config['params'].copy()
     else:
         request_params = {}
-    request_params['prompt'] = messages
+    # DeepSeek Chat API 正确格式
     request_params['model'] = config['model_name']
+    request_params['messages'] = [
+        {"role": "user", "content": messages}
+    ]
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {config['api_key']}"
     }
     url = config['base_url']
     result = do_post(url, request_params, headers, config['model_name'])
-    print(result)
-    text = result['choices'][0]['text']
+    # 正确读取 chat 返回格式
+    text = result['choices'][0]['message']['content']
     return {
-        "key" : key, 
-        "response"  : text
+        "key": key,
+        "response": text
     }
 
 
