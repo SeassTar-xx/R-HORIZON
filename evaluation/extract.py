@@ -40,7 +40,7 @@ if __name__ == '__main__':
     parser.add_argument('--input', type=str, default=None)
     parser.add_argument('--output', type=str, default='output.json')
     parser.add_argument('--config', type=str, default='evaluation/config.json')
-    parser.add_argument('--model_name', type=str, default='gpt-4.1')
+    parser.add_argument('--model_name', type=str, default='deepseek-reasoner')
     args = parser.parse_args()
     print(args)
     model_configs = json.load(open(args.config, 'r'))

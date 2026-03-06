@@ -201,7 +201,7 @@ if __name__ == '__main__':
     for line in open(args.raw_input, 'r'):
         item = json.loads(line)
         key = item['instanceId']
-        labels = item['target'][0].split(",")
+        labels = item['target']
         query_lst.append((key, labels))
         cnt += 1
     raw_df = pd.DataFrame(query_lst, columns=['key', 'labels'])

@@ -162,14 +162,17 @@ python ./evaluation/data/download.py
 
 3. Run a vllm server
 ```bash
-vllm serve {modelname}\
-    --host {ip}\
-    --port {port}\
-    --served-model-name {modelname}\
-    --dtype auto --pipeline-parallel-size 1 --tensor-parallel-size 1 --trust-remote-code\
-    --enable-chunked-prefill --max-model-len 131072 --max-num-batched-tokens 10240\
-    --max-num-seqs 256 --gpu-memory-utilization 0.85 --disable-custom-all-reduce\
-    --enable-reasoning --reasoning-parser deepseek_r1 --enable-chunked-prefill
+vllm serve /home/data/XuXin/qwen \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --served-model-name qwen3-4b \
+    --dtype auto \
+    --pipeline-parallel-size 1 \
+    --tensor-parallel-size 1 \
+    --trust-remote-code \
+    --max-model-len 131072 \
+    --gpu-memory-utilization 0.9 \
+    --enable-chunked-prefill
 ```
 
 4. Evaluate your model 
@@ -178,7 +181,7 @@ Here is a bash example, and model_key is defined in config.json
 ```bash
 sh evaluation/run.sh {input_file} {output_dir} {model_key}
 # example
-sh evaluation/run.sh evaluation/data/R-HORIZON-Math500/Math500-combined-n2.jsonl evaluation/result r1-distill-qwen7b
+sh evaluation/run.sh evaluation/data/R-HORIZON-Math500/Math500-combined-n2.jsonl evaluation/result qwen3-4b
 ```
 
 ### Training with R-HORIZON datasets
