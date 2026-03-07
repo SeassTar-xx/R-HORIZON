@@ -26,10 +26,81 @@ def extract_problem_answers(text: str):
         answers.append((int(problem_num), normalize_answer(answer.strip())))
     return answers
 
+def fix_fracs(string):
+    substrs = string.split("\\frac")
+    new_str = substrs[0]
+    if len(substrs) > 1:
+        substrs = substrs[1:]
+        for substr in substrs:
+            new_str += "\\frac"
+            if substr[0] == "{":
+                new_str += substr
+            else:
+                try:
+                    assert len(substr) >= 2
+                except AssertionError:
+                    return string
+                a = substr[0]
+                b = substr[1]
+                if b != "{":
+                    if len(substr) > 2:
+                        post_substr = substr[2:]
+                        new_str += "{" + a + "}{" + b + "}" + post_substr
+                    else:
+                        new_str += "{" + a + "}{" + b + "}"
+                else:
+                    if len(substr) > 2:
+                        post_substr = substr[2:]
+                        new_str += "{" + a + "}" + b + post_substr
+                    else:
+                        new_str += "{" + a + "}" + b
+    string = new_str
+    return string
+
+
+def fix_a_slash_b(string):
+    if len(string.split("/")) != 2:
+        return string
+    a = string.split("/")[0]
+    b = string.split("/")[1]
+    try:
+        a = int(a)
+        b = int(b)
+        assert string == "{}/{}".format(a, b)
+        new_string = "\\frac{" + str(a) + "}{" + str(b) + "}"
+        return new_string
+    except (AssertionError, ValueError):
+        return string
+
+
+def remove_right_units(string):
+    if "\\text{ " in string:
+        splits = string.split("\\text{ ")
+        assert len(splits) == 2
+        return splits[0]
+    else:
+        return string
+
+
+def fix_sqrt(string):
+    if "\\sqrt" not in string:
+        return string
+    splits = string.split("\\sqrt")
+    new_string = splits[0]
+    for split in splits[1:]:
+        if split[0] != "{":
+            a = split[0]
+            new_substr = "\\sqrt{" + a + "}" + split[1:]
+        else:
+            new_substr = "\\sqrt" + split
+        new_string += new_substr
+    return new_string
+
+
 def judge(resp, gold):
     if 'variable' in resp.lower() or 'Undefined' in resp.lower():
         return False
-    return is_equiv(resp, gold, fast = True)
+    return is_equiv(resp, gold, verbose=False)
 
 def is_equiv(str1, str2, verbose=False):
     if str1 is None and str2 is None:
@@ -80,7 +151,7 @@ def strip_string(string):
 
     # remove percentage
     string = string.replace("\\%", "")
-    string = string.replace("\%", "")  # noqa: W605
+    string = string.replace(r"\%", "")
 
     # " 0." equivalent to " ." and "{0." equivalent to "{." Alternatively, add "0" if "." is the start of the string
     string = string.replace(" .", " 0.")
@@ -108,6 +179,9 @@ def strip_string(string):
     # manually change 0.5 --> \frac{1}{2}
     if string == "0.5":
         string = "\\frac{1}{2}"
+
+    # 将 \pi/n 规范为 \frac{\pi}{n}，与标准答案格式一致（需在 fix_a_slash_b 之前，避免被误解析为 a/b）
+    string = re.sub(r'\\pi/(\d+)', r'\\frac{\\pi}{\1}', string)
 
     # NOTE: X/Y changed to \frac{X}{Y} in dataset, but in simple cases fix in case the model output is X/Y
     string = fix_a_slash_b(string)
@@ -152,7 +226,7 @@ def judge_multiquery_answer(key, extract_data, gold):
         if sum(labels) == len(gold_target):
             cnt_acc_all = 1
         # 最后一题对
-        if labels[-1] == True:
+        if labels[-1] == 1:
             cnt_acc_last = 1
             
     return key, {
@@ -219,10 +293,10 @@ if __name__ == '__main__':
         pred = row['response']
         wait_to_cal.append((key, pred, labels))
 
-    with open(args.output, 'w') as fo:
+    with open(args.output, 'w', encoding='utf-8') as fo:
         equal_judgement(wait_to_cal, fo)
 
-    res_df = pd.read_json(args.output, lines = True)
+    res_df = pd.read_json(args.output, lines=True, encoding='utf-8')
     # print(res_df)
     print("all correct precison : ", res_df['cnt_acc_all'].mean())
     print("last correct precision : ", res_df['cnt_acc_last'].mean())
