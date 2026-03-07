@@ -72,6 +72,9 @@ def strip_string(string):
     # remove dollar signs
     string = string.replace("\\$", "")
 
+    #识别pi
+    string = string.replace("π", "\\pi")
+
     # remove units (on the right)
     string = remove_right_units(string)
 
@@ -200,7 +203,7 @@ if __name__ == '__main__':
     cnt = 0
     for line in open(args.raw_input, 'r'):
         item = json.loads(line)
-        key = item['instanceId']
+        key = item['instanceId'] 
         labels = item['target']
         query_lst.append((key, labels))
         cnt += 1
