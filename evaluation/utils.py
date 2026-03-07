@@ -2,26 +2,44 @@ import requests
 import time
 import json
 
+
 def do_post(url, data, headers, model_name):
-    response = requests.post(url, json=data, headers=headers, timeout=(60, 600))
+    """
+    更健壮的 POST 封装：
+    - 总是打印 status_code 和部分返回内容，方便排查 DeepSeek 接口错误
+    - 正确处理 JSON 解析失败的情况
+    - 仅在 HTTP 200 且返回中包含 choices 字段时认为成功
+    """
     retry_times = 0
-    while True:
+    last_error_text = None
+    while retry_times <= 3:
         try:
-            if response is None or response.text is None:
-                text = response
-            else:
-                text = json.loads(response.text)
+            response = requests.post(url, json=data, headers=headers, timeout=(600, 600))
+            status = response.status_code
+            raw_text = response.text
+            try:
+                resp_json = response.json()
+            except Exception as e:
+                print(f"[{model_name}] JSON 解析失败: {e}, status={status}, raw={raw_text[:300]}")
+                resp_json = None
+
+            # 只在 200 且返回中有 choices 时认为成功（DeepSeek/OpenAI chat 标准格式）
+            if status == 200 and isinstance(resp_json, dict) and resp_json.get("choices"):
+                return resp_json
+
+            # 打印错误信息，继续重试
+            print(f"[{model_name}] 请求失败或无有效 choices, status={status}, body={str(resp_json)[:300]}")
+            last_error_text = raw_text
         except Exception as e:
-            print(f'error!! {model_name} result error: {e}')
-        answer = text
-        if response.status_code == 200 and answer is not None and len(answer) > 0:
-            return answer
+            print(f"[{model_name}] 请求异常: {e}")
+
         retry_times += 1
         if retry_times > 3:
             break
         time.sleep(60)
-        response = requests.post(url, json=data, headers=headers, timeout=(60, 600))
-    raise Exception(f"{model_name} no result")
+
+    # 所有重试失败，抛出更详细的异常信息
+    raise Exception(f"{model_name} no result, last_response={str(last_error_text)[:300]}")
 
 
 def request_response(key, messages, config):
