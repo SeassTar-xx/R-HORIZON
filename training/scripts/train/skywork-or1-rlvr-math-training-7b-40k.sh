@@ -21,10 +21,10 @@ set -o pipefail # Return the exit status of the last command in the pipe that fa
 # ⚙️ Default Configuration
 # ---
 # These can be overridden by command-line arguments.
-MODEL_PATH="r1-qwen-7b" # Path to your base model
+MODEL_PATH="qwen3-4b" # Path to your base model
 TRAIN_DATA_DIR="./training/data/" # Directory for training data
 EVAL_DATA_DIR="./training/data/"   # Directory for evaluation data
-OUTPUT_DIR="./checkpoints/r-horizon-rl-training" # Directory to save checkpoints and logs
+OUTPUT_DIR="./checkpoints/r-horizon-qwen-training" # Directory to save checkpoints and logs
 
 WORLD_SIZE=1  # Number of nodes
 GPUS_PER_NODE=8 # Number of GPUs per node
