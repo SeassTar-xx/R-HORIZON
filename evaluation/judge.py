@@ -264,6 +264,28 @@ def equal_judgement(queries, fo):
 
 
 
+def parse_labels_field(labels):
+    """
+    将原始数据中的 target 字段统一转换为“每小题一个答案”的列表。
+    R-HORIZON-Math500 数据集中，target 形如 ["64,10,-1,22,3,5,56,49"]，
+    需要按逗号拆分后再逐一与提取出的答案对齐。
+    """
+    # 常见情况：是只有一个元素的列表，里面是一整行用逗号分隔的答案
+    if isinstance(labels, list):
+        if len(labels) == 1 and isinstance(labels[0], str):
+            labels = labels[0]
+        else:
+            # 已经是逐题的列表
+            return [str(x).strip() for x in labels]
+
+    # 直接是字符串："64,10,-1,22,3,5,56,49"
+    if isinstance(labels, str):
+        return [x.strip() for x in labels.split(',') if x.strip() != '']
+
+    # 兜底：单个标量
+    return [str(labels).strip()]
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--raw_input', type=str, default=None)
@@ -277,8 +299,9 @@ if __name__ == '__main__':
     cnt = 0
     for line in open(args.raw_input, 'r'):
         item = json.loads(line)
-        key = item['instanceId'] 
-        labels = item['target']
+        key = item['instanceId']
+        # 将 target 解析为逐题答案列表，便于与提取出的答案一一对应
+        labels = parse_labels_field(item['target'])
         query_lst.append((key, labels))
         cnt += 1
     raw_df = pd.DataFrame(query_lst, columns=['key', 'labels'])
