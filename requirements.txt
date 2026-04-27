@@ -4,6 +4,7 @@ datasets
 dill
 hydra-core
 numpy
+flash-attn
 pandas
 peft
 pyarrow>=15.0.0
