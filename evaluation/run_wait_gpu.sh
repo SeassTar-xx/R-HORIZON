@@ -39,23 +39,95 @@ source /home/data/anaconda3/etc/profile.d/conda.sh
 conda activate r-horizon
 export PYTHONPATH="/home/data/XuXin/R-HORIZON/training"
 
-pick_gpu() {
+mkdir -p "${OUTPUT_DIR}"
+RUN_TS="$(date +%Y%m%d_%H%M%S)"
+MAIN_LOG="${OUTPUT_DIR}/run_wait_gpu_${RUN_TS}.log"
+VLLM_LOG="${OUTPUT_DIR}/vllm_qwen25_${RUN_TS}.log"
+exec > >(tee -a "${MAIN_LOG}") 2>&1
+echo "[INFO] Logs will be written to: ${MAIN_LOG}"
+
+list_candidate_gpus() {
   nvidia-smi --query-gpu=index,memory.free --format=csv,noheader,nounits 2>/dev/null \
     | awk -F, -v min_free="$MIN_FREE_MIB" '
       {
         gsub(/ /, "", $1); gsub(/ /, "", $2);
-        if ($2 >= min_free) {
-          if ($2 > best_free) {
-            best_free = $2; best_gpu = $1;
-          }
-        }
-      }
-      END { if (best_gpu != "") print best_gpu; }'
+        if (($2 + 0) >= (min_free + 0)) print $1 "," ($2 + 0);
+      }' \
+    | sort -t, -k2,2nr \
+    | awk -F, '{print $1}'
+}
+
+is_gpu_healthy() {
+  local gpu_id="$1"
+  CUDA_VISIBLE_DEVICES="${gpu_id}" python - <<'PY' >/dev/null 2>&1
+import torch
+if torch.cuda.device_count() < 1:
+    raise SystemExit(1)
+_ = torch.cuda.get_device_name(0)
+_ = torch.cuda.mem_get_info()
+PY
+}
+
+start_vllm_on_gpu() {
+  local gpu_id="$1"
+  if tmux has-session -t rh_eval_vllm 2>/dev/null; then
+    tmux kill-session -t rh_eval_vllm
+  fi
+  tmux new-session -d -s rh_eval_vllm \
+    "source /home/data/anaconda3/etc/profile.d/conda.sh && conda activate r-horizon && CUDA_VISIBLE_DEVICES=${gpu_id} vllm serve ${VLLM_MODEL} --host 127.0.0.1 --port ${PORT} --served-model-name ${SERVE_NAME} --dtype auto --tensor-parallel-size 1 --pipeline-parallel-size 1 --gpu-memory-utilization 0.35 --max-model-len 2048 --max-num-seqs 4 --trust-remote-code 2>&1 | tee -a ${VLLM_LOG}"
+}
+
+wait_vllm_ready() {
+  python - <<'PY'
+import requests
+import time
+url = "http://127.0.0.1:8000/v1/chat/completions"
+payload = {
+    "model": "qwen2.5-3b-local",
+    "messages": [{"role": "user", "content": "Reply with OK only."}],
+    "temperature": 0,
+    "max_tokens": 8,
+}
+for _ in range(60):
+    try:
+        r = requests.post(url, json=payload, timeout=20)
+        if r.status_code == 200:
+            print("[INFO] vLLM is ready")
+            raise SystemExit(0)
+    except Exception:
+        pass
+    time.sleep(5)
+print("[ERROR] vLLM was not ready in time")
+raise SystemExit(1)
+PY
 }
 
 echo "[INFO] Waiting for a GPU with free memory >= ${MIN_FREE_MIB} MiB ..."
+GPU_ID=""
 while true; do
-  GPU_ID="$(pick_gpu || true)"
+  mapfile -t CANDIDATES < <(list_candidate_gpus || true)
+  if [ "${#CANDIDATES[@]}" -eq 0 ]; then
+    echo "[INFO] No candidate GPU yet, sleep 30s ..."
+    sleep 30
+    continue
+  fi
+
+  for cand in "${CANDIDATES[@]}"; do
+    echo "[INFO] Probing candidate GPU ${cand} ..."
+    if ! is_gpu_healthy "${cand}"; then
+      echo "[WARN] GPU ${cand} failed health check, skip."
+      continue
+    fi
+
+    echo "[INFO] Starting vLLM on healthy GPU ${cand} ..."
+    start_vllm_on_gpu "${cand}"
+    if wait_vllm_ready; then
+      GPU_ID="${cand}"
+      break
+    fi
+    echo "[WARN] vLLM failed to become ready on GPU ${cand}, try next candidate."
+  done
+
   if [ -n "${GPU_ID}" ]; then
     echo "[INFO] Selected GPU ${GPU_ID}"
     break
@@ -69,35 +141,6 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
-
-tmux new-session -d -s rh_eval_vllm \
-  "source /home/data/anaconda3/etc/profile.d/conda.sh && conda activate r-horizon && CUDA_VISIBLE_DEVICES=${GPU_ID} vllm serve ${VLLM_MODEL} --host 127.0.0.1 --port ${PORT} --served-model-name ${SERVE_NAME} --dtype auto --tensor-parallel-size 1 --pipeline-parallel-size 1 --gpu-memory-utilization 0.35 --max-model-len 2048 --max-num-seqs 4 --trust-remote-code"
-
-echo "[INFO] Waiting for vLLM API readiness ..."
-python - <<'PY'
-import requests
-import time
-url = "http://127.0.0.1:8000/v1/chat/completions"
-payload = {
-    "model": "qwen2.5-3b-local",
-    "messages": [{"role": "user", "content": "Reply with OK only."}],
-    "temperature": 0,
-    "max_tokens": 8,
-}
-for _ in range(120):
-    try:
-        r = requests.post(url, json=payload, timeout=20)
-        if r.status_code == 200:
-            print("[INFO] vLLM is ready")
-            raise SystemExit(0)
-    except Exception:
-        pass
-    time.sleep(5)
-print("[ERROR] vLLM was not ready in time")
-raise SystemExit(1)
-PY
-
-mkdir -p "${OUTPUT_DIR}"
 
 if [ "${MODE}" = "single" ]; then
   echo "[INFO] Starting evaluation pipeline for single file: ${INPUT_FILE}"
