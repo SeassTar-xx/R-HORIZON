@@ -65,6 +65,7 @@ class RLHFDataset(Dataset):
                  tokenizer: PreTrainedTokenizer,
                  prompt_key='prompt',
                  max_prompt_length=1024,
+                 min_composed_query_num=1,
                  filter_prompts=True,
                  cache_dir='~/.cache/verl/rlhf',
                  chat_template_func=None,
@@ -80,6 +81,7 @@ class RLHFDataset(Dataset):
 
         self.prompt_key = prompt_key
         self.max_prompt_length = max_prompt_length
+        self.min_composed_query_num = min_composed_query_num
         self.filter_prompts = filter_prompts
 
         self.return_raw_chat = return_raw_chat
@@ -112,6 +114,36 @@ class RLHFDataset(Dataset):
         self.dataframe = pd.concat(dataframes)
 
         print(f'original dataset len: {len(self.dataframe)}')
+
+        # Optional filter: keep only chained composite queries (n >= min_composed_query_num).
+        if self.min_composed_query_num > 1:
+            def _extract_n(row):
+                direct = row.get("composed_query_num", None)
+                if isinstance(direct, (int, np.integer)):
+                    return int(direct)
+                if isinstance(direct, str) and direct.isdigit():
+                    return int(direct)
+
+                extra = row.get("extra_info", {}) or {}
+                n_from_extra = extra.get("composed_query_num", None) if isinstance(extra, dict) else None
+                if isinstance(n_from_extra, (int, np.integer)):
+                    return int(n_from_extra)
+                if isinstance(n_from_extra, str) and n_from_extra.isdigit():
+                    return int(n_from_extra)
+                n_from_problems = extra.get("num_problems", None) if isinstance(extra, dict) else None
+                if isinstance(n_from_problems, (int, np.integer)):
+                    return int(n_from_problems)
+                if isinstance(n_from_problems, str) and n_from_problems.isdigit():
+                    return int(n_from_problems)
+
+                reward_model = row.get("reward_model", {}) or {}
+                gt = reward_model.get("ground_truth", None) if isinstance(reward_model, dict) else None
+                if isinstance(gt, (list, tuple)):
+                    return len(gt)
+                return 1
+
+            self.dataframe = self.dataframe[self.dataframe.apply(lambda doc: _extract_n(doc) >= self.min_composed_query_num, axis=1)]
+            print(f'filter n>={self.min_composed_query_num} dataset len: {len(self.dataframe)}')
 
         # filter out too long prompts
         tokenizer = self.tokenizer

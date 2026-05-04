@@ -2,6 +2,7 @@ data:
   tokenizer: null
   train_files: ~/data/rlhf/gsm8k/train.parquet
   val_files: ~/data/rlhf/gsm8k/test.parquet
+  min_composed_query_num: 1
   prompt_key: prompt
   max_prompt_length: 512
   max_response_length: 512
@@ -155,6 +156,31 @@ reward_model:
   use_dynamic_bsz: ${critic.use_dynamic_bsz}
   forward_max_token_len_per_gpu: ${critic.forward_max_token_len_per_gpu}
   reward_manager: naive
+  dense_reward:
+    reward_weights:
+      prog: 0.4
+      comp: 0.2
+      neg: 0.15
+      cons: 0.15
+      form: 0.1
+    efficiency_penalty_lambda: 0.05
+    avg_tokens_per_problem:
+      easy: 2500
+      medium: 4000
+      hard: 16000
+    neg_reward_min: -0.2
+    neg_reward_max: 0.2
+    # Progress term: numeric / substring partial credit when exact match fails (see DenseChainRewardManager).
+    progress_partial_credit: True
+    enable_llm_judge: True
+    max_workers: 3
+    base_url: https://api.deepseek.com/v1/chat/completions
+    model_name: deepseek-reasoner
+    # 从环境变量读取；正式脚本会从 evaluation/config.json 注入 DEEPSEEK_API_KEY，勿把密钥写进仓库。
+    api_key: ${oc.env:DEEPSEEK_API_KEY,""}
+    temperature: 0.0
+    max_tokens: 16000
+    timeout: 30
 
 algorithm:
   gamma: 1.0
@@ -183,6 +209,8 @@ trainer:
   nnodes: 1
   n_gpus_per_node: 8
   save_freq: -1
+  # On normal completion, save once more so weights after the last step are not skipped (independent of save_freq).
+  save_final_checkpoint: True
   # auto: find the last ckpt to resume. If can't find, start from scratch
   resume_mode: auto # or auto or resume_path if 
   resume_from_path: False

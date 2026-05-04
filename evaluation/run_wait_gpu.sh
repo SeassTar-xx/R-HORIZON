@@ -19,11 +19,7 @@ MIN_FREE_MIB=""
 
 if [ "${1}" = "--all" ]; then
   MODE="all"
-  if [ "$#" -lt 2 ]; then
-    echo "Usage: bash evaluation/run_wait_gpu.sh --all <output_dir> [min_free_mib]"
-    exit 1
-  fi
-  OUTPUT_DIR="$2"
+  OUTPUT_DIR="${2:-evaluation/result_all}"
   MIN_FREE_MIB="${3:-11000}"
 else
   if [ "$#" -lt 2 ]; then
@@ -35,9 +31,24 @@ else
   MIN_FREE_MIB="${3:-11000}"
 fi
 
-source /home/data/anaconda3/etc/profile.d/conda.sh
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CONDA_SH="/root/miniconda3/etc/profile.d/conda.sh"
+if [ ! -f "${CONDA_SH}" ]; then
+  CONDA_SH="/home/data/anaconda3/etc/profile.d/conda.sh"
+fi
+source "${CONDA_SH}"
 conda activate r-horizon
-export PYTHONPATH="/home/data/XuXin/R-HORIZON/training"
+export PYTHONPATH="${REPO_ROOT}/training:${PYTHONPATH:-}"
+export CUDA_HOME="${CONDA_PREFIX}"
+export PATH="${CUDA_HOME}/bin:${PATH}"
+export LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${LD_LIBRARY_PATH:-}"
+export TMPDIR="/root/.cache/pip/tmp"
+export PIP_CACHE_DIR="/root/.cache/pip"
+mkdir -p "${TMPDIR}" "${PIP_CACHE_DIR}"
+
+if [ "${MODE}" = "all" ]; then
+  OUTPUT_DIR="evaluation/result_all"
+fi
 
 mkdir -p "${OUTPUT_DIR}"
 RUN_TS="$(date +%Y%m%d_%H%M%S)"
@@ -74,7 +85,7 @@ start_vllm_on_gpu() {
     tmux kill-session -t rh_eval_vllm
   fi
   tmux new-session -d -s rh_eval_vllm \
-    "source /home/data/anaconda3/etc/profile.d/conda.sh && conda activate r-horizon && CUDA_VISIBLE_DEVICES=${gpu_id} vllm serve ${VLLM_MODEL} --host 127.0.0.1 --port ${PORT} --served-model-name ${SERVE_NAME} --dtype auto --tensor-parallel-size 1 --pipeline-parallel-size 1 --gpu-memory-utilization 0.35 --max-model-len 2048 --max-num-seqs 4 --trust-remote-code 2>&1 | tee -a ${VLLM_LOG}"
+    "source ${CONDA_SH} && conda activate r-horizon && export CUDA_HOME=\$CONDA_PREFIX && export PATH=\$CUDA_HOME/bin:\$PATH && export LD_LIBRARY_PATH=\$CUDA_HOME/lib64:\${LD_LIBRARY_PATH:-} && export TMPDIR=/root/.cache/pip/tmp && export PIP_CACHE_DIR=/root/.cache/pip && CUDA_VISIBLE_DEVICES=${gpu_id} vllm serve ${VLLM_MODEL} --host 127.0.0.1 --port ${PORT} --served-model-name ${SERVE_NAME} --dtype auto --tensor-parallel-size 1 --pipeline-parallel-size 1 --gpu-memory-utilization 0.35 --max-model-len 2048 --max-num-seqs 4 --trust-remote-code 2>&1 | tee -a ${VLLM_LOG}"
 }
 
 wait_vllm_ready() {

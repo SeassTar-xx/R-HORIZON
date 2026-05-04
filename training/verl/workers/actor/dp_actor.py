@@ -31,7 +31,12 @@ from verl.utils.ulysses import ulysses_pad_and_slice_inputs, gather_outpus_and_u
 from verl.utils.seqlen_balancing import rearrange_micro_batches, get_reverse_idx
 import verl.utils.torch_functional as verl_F
 
-from flash_attn.bert_padding import pad_input, unpad_input, rearrange, index_first_axis
+try:
+    from flash_attn.bert_padding import pad_input, unpad_input, rearrange, index_first_axis
+    _flash_attn_available = True
+except Exception:
+    pad_input = unpad_input = rearrange = index_first_axis = None
+    _flash_attn_available = False
 
 __all__ = ['DataParallelPPOActor']
 
@@ -49,17 +54,25 @@ class DataParallelPPOActor(BasePPOActor):
         self.actor_module = actor_module
         self.actor_optimizer = actor_optimizer
         self.use_remove_padding = self.config.get('use_remove_padding', False)
+        if self.use_remove_padding and not _flash_attn_available:
+            raise RuntimeError("use_remove_padding=True requires flash-attn, but flash-attn is unavailable.")
         print(f'Actor use_remove_padding={self.use_remove_padding}')
         self.ulysses_sequence_parallel_size = self.config.ulysses_sequence_parallel_size
         self.use_ulysses_sp = self.ulysses_sequence_parallel_size > 1
 
-        self.compute_entropy_from_logits = torch.compile(verl_F.entropy_from_logits, dynamic=True)
+        # Chunked softmax over vocab avoids multi-GB spikes on long responses (e.g. 24GB GPUs).
+        self.entropy_logits_chunk_size = int(self.config.get('entropy_logits_chunk_size', 24))
 
-    def _forward_micro_batch(self, micro_batch, temperature) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _entropy_from_logits_safe(self, logits: torch.Tensor) -> torch.Tensor:
+        return verl_F.entropy_from_logits_chunked(logits, chunk_size=self.entropy_logits_chunk_size)
+
+    def _forward_micro_batch(self, micro_batch, temperature, compute_entropy: bool = True) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Returns: 
             entropy: # (bs, response_len)
             log_probs: # (bs, response_len)
+
+        When compute_entropy=False (e.g. inference-only log_prob), skips softmax over vocab to save VRAM.
         """
         response_length = micro_batch['responses'].size(-1)
         with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
@@ -99,8 +112,11 @@ class DataParallelPPOActor(BasePPOActor):
 
                 logits_rmpad.div_(temperature)
 
-                # compute entropy
-                entropy_rmpad = self.compute_entropy_from_logits(logits_rmpad)  # ((total_nnz / sp) + pad)
+                # compute entropy (optional; skipped when only log_probs are needed)
+                if compute_entropy:
+                    entropy_rmpad = self._entropy_from_logits_safe(logits_rmpad)  # ((total_nnz / sp) + pad)
+                else:
+                    entropy_rmpad = logits_rmpad.new_zeros(logits_rmpad.shape[:-1])
 
                 # if use_sp: ((total_nnz / sp) + pad) ; if not use_sp: (batch, seqlen)
                 log_probs = logprobs_from_logits(logits=logits_rmpad, labels=input_ids_rmpad_rolled)
@@ -136,7 +152,10 @@ class DataParallelPPOActor(BasePPOActor):
                 logits.div_(temperature)
                 logits = logits[:, -response_length - 1:-1, :]  # (bsz, response_length, vocab_size)
                 log_probs = logprobs_from_logits(logits, micro_batch['responses'])
-                entropy = verl_F.entropy_from_logits(logits)  # (bsz, response_length)
+                if compute_entropy:
+                    entropy = self._entropy_from_logits_safe(logits)  # (bsz, response_length)
+                else:
+                    entropy = logits.new_zeros(logits.shape[:-1])
 
             return entropy, log_probs
 
@@ -188,7 +207,9 @@ class DataParallelPPOActor(BasePPOActor):
         log_probs_lst = []
         for micro_batch in micro_batches:
             with torch.no_grad():
-                _, log_probs = self._forward_micro_batch(micro_batch, temperature=temperature)
+                _, log_probs = self._forward_micro_batch(
+                    micro_batch, temperature=temperature, compute_entropy=False
+                )
             log_probs_lst.append(log_probs)
         log_probs = torch.concat(log_probs_lst, dim=0)
 

@@ -1,4 +1,35 @@
+# --- 本地密钥与评测配置（勿提交真实 key）---
 evaluation/config.json
-training/data
-evaluation/data
-evaluation/result_all
+
+# --- 大体积数据（用网盘 / Release / Git LFS 分发）---
+training/data/
+evaluation/data/
+evaluation/result_all/
+
+# --- 训练产物与缓存（本地 / 数据盘）---
+training/checkpoints
+outputs/
+wandb/
+*.log
+**/hydra_run/
+**/resolved_config.yaml
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
+.venv/
+venv/
+.env
+.env.*
+
+# --- IDE / 系统 ---
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# --- Jupyter ---
+.ipynb_checkpoints/

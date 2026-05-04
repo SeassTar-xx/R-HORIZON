@@ -15,3 +15,4 @@
 from .naive import NaiveRewardManager
 from .prime import PrimeRewardManager
 from .yr_code import YRRewardManager
+from .dense_chain import DenseChainRewardManager

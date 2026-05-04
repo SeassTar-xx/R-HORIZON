@@ -58,6 +58,18 @@ def create_device_mesh(world_size, fsdp_size):
     return device_mesh
 
 
+def _to_regular_types(obj):
+    if isinstance(obj, DictConfig):
+        return {k: _to_regular_types(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_to_regular_types(x) for x in obj]
+    if isinstance(obj, tuple):
+        return [_to_regular_types(x) for x in obj]
+    if isinstance(obj, dict):
+        return {k: _to_regular_types(v) for k, v in obj.items()}
+    return obj
+
+
 def get_sharding_strategy(device_mesh):
     from torch.distributed.fsdp import ShardingStrategy
     if device_mesh.ndim == 1:
@@ -152,6 +164,7 @@ class ActorRolloutRefWorker(Worker):
         from transformers import AutoModelForCausalLM, AutoConfig
         from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, ShardingStrategy, MixedPrecision, CPUOffload
         from torch import optim
+        from peft import LoraConfig, TaskType, get_peft_model
 
         assert role in ['actor', 'ref']
 
@@ -201,6 +214,17 @@ class ActorRolloutRefWorker(Worker):
                                                                 config=actor_model_config,
                                                                 attn_implementation='flash_attention_2',
                                                                 trust_remote_code=trust_remote_code)
+            # Optional LoRA path for low-memory single-GPU training.
+            if role == 'actor' and self.config.model.get('lora_rank', 0) > 0:
+                actor_module.enable_input_require_grads()
+                lora_cfg = {
+                    'task_type': TaskType.CAUSAL_LM,
+                    'r': int(self.config.model.lora_rank),
+                    'lora_alpha': int(self.config.model.get('lora_alpha', 16)),
+                    'target_modules': _to_regular_types(self.config.model.get('target_modules', [])),
+                    'bias': 'none',
+                }
+                actor_module = get_peft_model(actor_module, LoraConfig(**lora_cfg))
             # Apply Liger kernel to the model if use_liger is set to True
             if use_liger:
                 from liger_kernel.transformers.monkey_patch import _apply_liger_kernel_to_instance
@@ -231,9 +255,12 @@ class ActorRolloutRefWorker(Worker):
 
         mixed_precision = MixedPrecision(param_dtype=param_dtype, reduce_dtype=reduce_dtype, buffer_dtype=buffer_dtype)
 
-        auto_wrap_policy = get_fsdp_wrap_policy(module=actor_module, config=fsdp_config.get('wrap_policy', None))
+        auto_wrap_policy = get_fsdp_wrap_policy(module=actor_module,
+                                                config=fsdp_config.get('wrap_policy', None),
+                                                is_lora=(role == 'actor' and self.config.model.get('lora_rank', 0) > 0))
 
-        if self._is_rollout and self.config.rollout.name == 'hf':
+        keep_wrap_policy_for_hf = self.config.model.get('keep_wrap_policy_for_hf', False)
+        if self._is_rollout and self.config.rollout.name == 'hf' and not keep_wrap_policy_for_hf:
             # TODO(zhangchi.usc1992, shengguangming) fix me. Current, auto_wrap_policy causes HFRollout to hang in Gemma
             auto_wrap_policy = None
 
@@ -246,11 +273,12 @@ class ActorRolloutRefWorker(Worker):
         # We force reference policy to use CPUOffload to save memory.
         # We force turn off CPUOffload for actor because it causes incorrect results when using grad accumulation
         cpu_offload = None if role == 'actor' else CPUOffload(offload_params=True)
+        use_orig_params = fsdp_config.get('use_orig_params', False)
         actor_module_fsdp = FSDP(
             actor_module,
             cpu_offload=cpu_offload,
             param_init_fn=init_fn,
-            use_orig_params=False,
+            use_orig_params=use_orig_params,
             auto_wrap_policy=auto_wrap_policy,
             device_id=torch.cuda.current_device(),
             sharding_strategy=sharding_strategy,  # zero3

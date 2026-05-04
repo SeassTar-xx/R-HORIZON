@@ -22,7 +22,17 @@ from transformers import PretrainedConfig, PreTrainedTokenizer, PreTrainedTokeni
 from verl.workers.rollout.tokenizer import HybridEngineBaseTokenizer
 from vllm import LLM
 from vllm.outputs import EmbeddingRequestOutput, RequestOutput
-from vllm.utils import Counter
+try:
+    from vllm.utils import Counter
+except Exception:
+    # vLLM >= 0.20 removed/relocated Counter; keep a tiny compatible fallback.
+    class Counter:
+        def __init__(self):
+            self._value = 0
+
+        def __next__(self):
+            self._value += 1
+            return self._value - 1
 
 from .arg_utils import EngineArgs
 from .llm_engine_sp import LLMEngine

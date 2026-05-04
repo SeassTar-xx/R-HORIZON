@@ -22,6 +22,13 @@ def get_version(pkg):
         return None
 
 
+def _parse_version(v: str):
+    try:
+        return tuple(int(x) for x in v.split(".")[:3])
+    except Exception:
+        return (0, 0, 0)
+
+
 package_name = 'vllm'
 package_version = get_version(package_name)
 
@@ -45,7 +52,14 @@ elif package_version == '0.6.3':
     from .vllm_v_0_6_3.llm import LLM
     from .vllm_v_0_6_3.llm import LLMEngine
     from .vllm_v_0_6_3 import parallel_state
+elif package_version is not None and _parse_version(package_version) >= (0, 20, 0):
+    # Keep using verl's 0.6.3 compatibility layer for newer vLLM during migration.
+    # Follow-up patches may be required if upstream API changes break this adapter.
+    vllm_version = package_version
+    from .vllm_v_0_6_3.llm import LLM
+    from .vllm_v_0_6_3.llm import LLMEngine
+    from .vllm_v_0_6_3 import parallel_state
 else:
     raise ValueError(
-        f'vllm version {package_version} not supported. Currently supported versions are 0.3.1, 0.4.2, 0.5.4 and 0.6.3.'
+        f'vllm version {package_version} not supported. Currently supported versions are 0.3.1, 0.4.2, 0.5.4, 0.6.3 and >=0.20.0 (compat mode).'
     )

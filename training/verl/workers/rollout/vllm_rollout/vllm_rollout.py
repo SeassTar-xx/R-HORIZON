@@ -83,7 +83,7 @@ class vLLMRollout(BaseRollout):
             os.environ['MEGATRON_IMPORT_TIMERS'] = '0'
             train_tp = kwargs.get('train_tp', None)
             num_tp_per_train_tp = train_tp // tensor_parallel_size
-            if vllm_version in ('0.4.2', '0.5.4', '0.6.3'):
+            if hasattr(vllm_ps, 'initialize_parallel_state'):
                 vllm_ps.initialize_parallel_state(tensor_model_parallel_size=tensor_parallel_size,
                                                   num_tp_per_train_tp=num_tp_per_train_tp)
 
@@ -115,7 +115,7 @@ class vLLMRollout(BaseRollout):
         )
 
         # we may detokenize the result all together later
-        if vllm_version in ('0.4.2', '0.5.4', '0.6.3'):
+        if 'detokenize' in SamplingParams.__init__.__code__.co_varnames:
             kwargs['detokenize'] = False
 
         # supporting adding any sampling params from the config file

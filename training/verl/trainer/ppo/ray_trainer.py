@@ -18,9 +18,10 @@ This trainer supports model-agonistic model initialization with huggingface
 
 import json
 import os
+import time
 import uuid
 from contextlib import contextmanager
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from enum import Enum
 from pprint import pprint
@@ -389,6 +390,9 @@ class RayPPOTrainer(object):
                                                  use_adapt_ent=use_adapt_ent)
         self.adapt_ent_config = adapt_ent_config
 
+        self._train_metric_ma_len = 10
+        self._dense_reward_ma = deque(maxlen=self._train_metric_ma_len)
+        self._response_len_ma = deque(maxlen=self._train_metric_ma_len)
 
         if self.config.algorithm.adv_estimator == 'gae':
             self.use_critic = True
@@ -490,6 +494,7 @@ class RayPPOTrainer(object):
                                          tokenizer=self.tokenizer,
                                          prompt_key=self.config.data.prompt_key,
                                          max_prompt_length=self.config.data.max_prompt_length,
+                                         min_composed_query_num=self.config.data.get('min_composed_query_num', 1),
                                          filter_prompts=True,
                                          return_raw_chat=self.config.data.get('return_raw_chat', False),
                                          truncation='error')
@@ -517,6 +522,7 @@ class RayPPOTrainer(object):
                                        tokenizer=self.tokenizer,
                                        prompt_key=self.config.data.prompt_key,
                                        max_prompt_length=self.config.data.max_prompt_length,
+                                       min_composed_query_num=self.config.data.get('min_composed_query_num', 1),
                                        filter_prompts=True,
                                        return_raw_chat=self.config.data.get('return_raw_chat', False),
                                        truncation='error')
@@ -733,6 +739,7 @@ class RayPPOTrainer(object):
                         "reward_model": self._convert_numpy_types(reward_models[i]),
                         "extra_info": self._convert_numpy_types(extra_info[i])
                     }
+                    data_to_save = self._convert_numpy_types(data_to_save)
                     f.write(json.dumps(data_to_save, ensure_ascii=False) + "\n")
                 
             
@@ -911,13 +918,125 @@ class RayPPOTrainer(object):
             return int(obj)
         elif isinstance(obj, np.floating):
             return float(obj)
+        elif isinstance(obj, np.bool_):
+            return bool(obj)
+        elif isinstance(obj, np.generic):
+            return obj.item()
         elif isinstance(obj, dict):
             return {key: self._convert_numpy_types(value) for key, value in obj.items()}
         elif isinstance(obj, list):
             return [self._convert_numpy_types(item) for item in obj]
+        elif isinstance(obj, tuple):
+            return [self._convert_numpy_types(item) for item in obj]
+        elif isinstance(obj, set):
+            return [self._convert_numpy_types(item) for item in obj]
+        elif hasattr(obj, 'tolist'):
+            try:
+                return self._convert_numpy_types(obj.tolist())
+            except Exception:
+                pass
         elif hasattr(obj, 'isoformat'):  # 处理所有datetime-like对象
             return obj.isoformat()
         return obj
+
+    def _training_stage(self) -> int:
+        s = int(self.global_steps)
+        if s <= 200:
+            return 0
+        if s <= 400:
+            return 1
+        return 2
+
+    def _append_moving_average_metrics(self, metrics: dict) -> None:
+        metrics['step'] = int(self.global_steps)
+        metrics['stage'] = self._training_stage()
+        metrics['time_per_step'] = float(metrics.get('timing_s/step', 0.0) or 0.0)
+        metrics['entropy_loss'] = float(metrics.get('actor/entropy_loss', 0.0) or 0.0)
+        metrics['kl_divergence'] = float(metrics.get('actor/ppo_kl', 0.0) or 0.0)
+        metrics['train_loss'] = float(metrics.get('actor/total_loss', 0.0) or 0.0)
+
+        rf = self.reward_fn
+        if hasattr(rf, '_last_step_dense_means') and getattr(rf, '_last_step_dense_means', None):
+            self._dense_reward_ma.append(dict(rf._last_step_dense_means))
+        rl = metrics.get('response_length/mean')
+        if rl is not None:
+            self._response_len_ma.append(float(rl))
+
+        keys = ['total_reward', 'prog_reward', 'comp_reward', 'neg_reward', 'cons_reward', 'form_reward']
+        for k in keys:
+            vals = [d[k] for d in self._dense_reward_ma if k in d]
+            metrics[k] = float(sum(vals) / len(vals)) if vals else 0.0
+        rlv = list(self._response_len_ma)
+        metrics['response_length'] = float(sum(rlv) / len(rlv)) if rlv else 0.0
+
+        if hasattr(rf, '_last_step_llm_stats') and getattr(rf, '_last_step_llm_stats', None):
+            metrics.update(rf._last_step_llm_stats)
+
+    def _eval_aime_benchmarks(self) -> dict:
+        from verl.trainer.aime_eval_metrics import (
+            default_aime_paths,
+            jsonl_to_eval_row,
+            load_jsonl,
+            score_response_vs_target,
+            tokenize_rows,
+        )
+
+        out = {}
+        paths = default_aime_paths()
+        ovr = self.config.trainer.get('aime_eval_paths', None)
+        if ovr is not None:
+            paths.update(OmegaConf.to_container(ovr, resolve=True))
+
+        bs = int(getattr(self.config.trainer, 'aime_eval_batch_size', 4))
+        max_prompt = int(self.config.data.max_prompt_length)
+        trunc = getattr(self.config.data, 'truncation', 'error')
+
+        for name, path in paths.items():
+            if not os.path.isfile(path):
+                print(f'[aime_eval] missing file, skip {name}: {path}')
+                continue
+            lines = load_jsonl(path)
+            rows_ev = [jsonl_to_eval_row(obj, i) for i, obj in enumerate(lines)]
+            scores = []
+            for start in range(0, len(rows_ev), bs):
+                chunk = rows_ev[start:start + bs]
+                batch_dict = tokenize_rows(self.tokenizer, chunk, max_prompt, truncation=trunc)
+                test_batch = DataProto.from_single_dict(batch_dict)
+                test_gen_batch = test_batch.pop(['input_ids', 'attention_mask', 'position_ids'])
+                test_gen_batch.meta_info = {
+                    'eos_token_id': self.tokenizer.eos_token_id,
+                    'pad_token_id': self.tokenizer.pad_token_id,
+                    'recompute_log_prob': False,
+                    'do_sample': False,
+                    'validate': True,
+                }
+                test_gen_batch_padded, pad_size = pad_dataproto_to_divisor(
+                    test_gen_batch, self.actor_rollout_wg.world_size
+                )
+                test_gen_batch_padded.meta_info['val_temperature'] = (
+                    self.config.actor_rollout_ref.rollout.val_temperature
+                )
+                test_output_gen_batch_padded = self.actor_rollout_wg.generate_sequences(
+                    test_gen_batch_padded
+                )
+                test_output_gen_batch = unpad_dataproto(test_output_gen_batch_padded, pad_size=pad_size)
+                test_batch = test_batch.union(test_output_gen_batch)
+                for j in range(len(test_batch)):
+                    item = test_batch[j]
+                    resp_ids = item.batch['responses']
+                    resp = self.tokenizer.decode(resp_ids, skip_special_tokens=True)
+                    ei = item.non_tensor_batch.get('extra_info', {})
+                    if not isinstance(ei, dict):
+                        n_prob = 1
+                    else:
+                        n_prob = int(ei.get('composed_query_num', 1))
+                    rm = item.non_tensor_batch.get('reward_model', {})
+                    gt = rm.get('ground_truth', []) if isinstance(rm, dict) else []
+                    if isinstance(gt, np.ndarray):
+                        gt = gt.tolist()
+                    scores.append(score_response_vs_target(resp, gt, n_prob))
+            out[f'{name}_acc'] = float(sum(scores) / len(scores)) if scores else 0.0
+        return out
 
     def fit(self):
         """
@@ -939,7 +1058,8 @@ class RayPPOTrainer(object):
         self._load_checkpoint()
 
         # First validation before training
-        if self.val_reward_fn is not None and self.config.trainer.get('val_before_train', True):
+        skip_validation = bool(self.config.trainer.get('skip_validation', False))
+        if self.val_reward_fn is not None and self.config.trainer.get('val_before_train', True) and not skip_validation:
             val_metrics = self._validate_with_temperatures()
             pprint(f'Initial validation metrics: {val_metrics}')
             logger.log(data=val_metrics, step=self.global_steps)
@@ -1233,7 +1353,7 @@ class RayPPOTrainer(object):
                         metrics.update(actor_output_metrics)
 
                     # validate
-                    if self.val_reward_fn is not None and self.config.trainer.test_freq > 0 and \
+                    if self.val_reward_fn is not None and (not skip_validation) and self.config.trainer.test_freq > 0 and \
                         self.global_steps % self.config.trainer.test_freq == 0:
                         with _timer('testing', timing_raw):
                             val_metrics = self._validate_with_temperatures()
@@ -1245,11 +1365,24 @@ class RayPPOTrainer(object):
                             self._save_checkpoint()
 
                 # collect metrics
-                current_ent = metrics["actor/entropy_loss"]
-                self.ent_ctrl.update(current_ent)
+                if "actor/entropy_loss" in metrics:
+                    self.ent_ctrl.update(metrics["actor/entropy_loss"])
                 metrics.update(self.metric_func(batch_dict=batch_dict, batch=batch.batch))
                 metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
                 metrics.update(compute_timing_metrics(batch=batch, timing_raw=timing_raw))
+
+                ae_freq = getattr(self.config.trainer, 'aime_eval_freq', 20)
+                if ae_freq > 0 and self.global_steps % ae_freq == 0:
+                    t_aime = time.time()
+                    try:
+                        metrics.update(self._eval_aime_benchmarks())
+                    except Exception as e:
+                        print(f'[aime_eval] failed: {e}')
+                        import traceback
+                        traceback.print_exc()
+                    metrics['aime_eval_wall_s'] = time.time() - t_aime
+
+                self._append_moving_average_metrics(metrics)
 
                 # TODO: make a canonical logger that supports various backend
                 logger.log(data=metrics, step=self.global_steps)
@@ -1308,7 +1441,7 @@ class RayPPOTrainer(object):
                     
                     with open(os.path.join(save_stats_path, f"train_batch_stats_steps_{save_start_step}_to_{save_end_step}.jsonl"), "w") as f:
                         for data in save_data:
-                            f.write(json.dumps(data, ensure_ascii=False) + "\n")
+                            f.write(json.dumps(self._convert_numpy_types(data), ensure_ascii=False) + "\n")
                     
                     # Reset the accumulator and update the interval start for the next save
                     save_data = []
@@ -1319,8 +1452,13 @@ class RayPPOTrainer(object):
                 if self.global_steps >= self.total_training_steps:
 
                     # Final validation after training
-                    if self.val_reward_fn is not None:
+                    if self.val_reward_fn is not None and not skip_validation:
                         val_metrics = self._validate_with_temperatures()
                         pprint(f'Final validation metrics: {val_metrics}')
                         logger.log(data=val_metrics, step=self.global_steps)
+
+                    # Last optimizer state may fall between periodic save_freq ticks; flush once at exit.
+                    if bool(getattr(self.config.trainer, 'save_final_checkpoint', True)):
+                        print(f'[checkpoint] saving final checkpoint at global_steps={self.global_steps}')
+                        self._save_checkpoint()
                     return

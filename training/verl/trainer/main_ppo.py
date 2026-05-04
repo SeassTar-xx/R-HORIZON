@@ -28,8 +28,19 @@ def main(config):
 
 def run_ppo(config, compute_score=None):
     if not ray.is_initialized():
-        # this is for local ray cluster
-        ray.init(runtime_env={'env_vars': {'TOKENIZERS_PARALLELISM': 'true', 'NCCL_DEBUG': 'WARN'}})
+        # 容器 / 部分环境下 Ray 无法自动发现 GPU，导致 Actor 永远拿不到卡（nvidia-smi 空闲）。
+        # 用 torch 可见卡数显式声明 cluster GPU 资源。
+        import torch
+        _ngpu = int(torch.cuda.device_count()) if torch.cuda.is_available() else 0
+        _kwargs = {
+            'runtime_env': {'env_vars': {'TOKENIZERS_PARALLELISM': 'true', 'NCCL_DEBUG': 'WARN'}},
+        }
+        if _ngpu > 0:
+            _kwargs['num_gpus'] = _ngpu
+            print(f'[ray] ray.init(num_gpus={_ngpu}) (torch.cuda.device_count())')
+        else:
+            print('[ray] WARNING: torch sees 0 CUDA devices; ray.init without num_gpus')
+        ray.init(**_kwargs)
 
         # debug
         # ray.init(
@@ -55,6 +66,15 @@ def main_task(config, compute_score=None):
     from omegaconf import OmegaConf
     pprint(OmegaConf.to_container(config, resolve=True))  # resolve=True will eval symbol values
     OmegaConf.resolve(config)
+
+    save_cfg = config.trainer.get('save_resolved_config_path', None)
+    if save_cfg:
+        import os
+        d = os.path.dirname(os.path.abspath(save_cfg))
+        if d:
+            os.makedirs(d, exist_ok=True)
+        OmegaConf.save(config, save_cfg)
+        print(f'[config] saved resolved config to {save_cfg}')
 
     # download the checkpoint from hdfs
     local_path = copy_local_path_from_hdfs(config.actor_rollout_ref.model.path)
@@ -123,12 +143,26 @@ def main_task(config, compute_score=None):
     elif reward_manager_name == 'yr':
         from verl.workers.reward_manager import YRRewardManager
         reward_manager_cls = YRRewardManager
+    elif reward_manager_name == 'dense_chain':
+        from verl.workers.reward_manager import DenseChainRewardManager
+        reward_manager_cls = DenseChainRewardManager
     else:
         raise NotImplementedError
-    reward_fn = reward_manager_cls(tokenizer=tokenizer, num_examine=0, compute_score=compute_score, is_long_penalty=config.reward_model.get("is_long_penalty", False), is_binary_reward=config.reward_model.get("is_binary_reward", True), is_power4_reward=config.reward_model.get("is_power4_reward", False))
 
-    # Note that we always use function-based RM for validation
-    val_reward_fn = reward_manager_cls(tokenizer=tokenizer, num_examine=1, compute_score=compute_score)
+    if reward_manager_name == 'dense_chain':
+        dense_cfg = config.reward_model.get("dense_reward", {})
+        reward_fn = reward_manager_cls(tokenizer=tokenizer, num_examine=0, dense_reward_config=dense_cfg)
+        val_reward_fn = reward_manager_cls(tokenizer=tokenizer, num_examine=1, dense_reward_config=dense_cfg)
+    else:
+        reward_fn = reward_manager_cls(tokenizer=tokenizer,
+                                       num_examine=0,
+                                       compute_score=compute_score,
+                                       is_long_penalty=config.reward_model.get("is_long_penalty", False),
+                                       is_binary_reward=config.reward_model.get("is_binary_reward", True),
+                                       is_power4_reward=config.reward_model.get("is_power4_reward", False))
+
+        # Note that we always use function-based RM for validation
+        val_reward_fn = reward_manager_cls(tokenizer=tokenizer, num_examine=1, compute_score=compute_score)
 
     resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
 

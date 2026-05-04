@@ -110,6 +110,27 @@ def entropy_from_logits(logits: torch.Tensor):
     return entropy
 
 
+def entropy_from_logits_chunked(logits: torch.Tensor, chunk_size: int = 64):
+    """Same as entropy_from_logits but chunks along sequence/nnz to reduce softmax peak memory."""
+    if chunk_size <= 0:
+        return entropy_from_logits(logits)
+    if logits.dim() == 2:
+        pieces = []
+        for i in range(0, logits.size(0), chunk_size):
+            pieces.append(entropy_from_logits(logits[i:i + chunk_size]))
+            if logits.is_cuda:
+                torch.cuda.empty_cache()
+        return torch.cat(pieces, dim=0)
+    if logits.dim() == 3:
+        pieces = []
+        for i in range(0, logits.size(1), chunk_size):
+            pieces.append(entropy_from_logits(logits[:, i:i + chunk_size, :]))
+            if logits.is_cuda:
+                torch.cuda.empty_cache()
+        return torch.cat(pieces, dim=1)
+    return entropy_from_logits(logits)
+
+
 def masked_sum(values, mask, axis=None):
     """Compute mean of tensor with a masked values."""
     return (values * mask).sum(axis=axis)
