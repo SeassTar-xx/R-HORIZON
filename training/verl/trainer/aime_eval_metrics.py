@@ -16,19 +16,19 @@ from verl.utils.reward_score.deepscaler_math_multi_verify.utils.utils import (
 )
 
 
-def repo_root_r_horizon() -> str:
+def repo_root() -> str:
     # training/verl/trainer/aime_eval_metrics.py -> repo root is parents x3
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 
 def default_aime_paths() -> Dict[str, str]:
-    repo_root = repo_root_r_horizon()
-    d = os.path.join(repo_root, "evaluation", "data")
+    root = repo_root()
+    d = os.path.join(root, "evaluation", "data")
     return {
-        "aime24_n1": os.path.join(d, "R-HORIZON-AIME24", "AIME24-origin.jsonl"),
-        "aime24_n2": os.path.join(d, "R-HORIZON-AIME24", "AIME24-combined-n2.jsonl"),
-        "aime25_n1": os.path.join(d, "R-HORIZON-AIME25", "AIME25-origin.jsonl"),
-        "aime25_n2": os.path.join(d, "R-HORIZON-AIME25", "AIME25-combined-n2.jsonl"),
+        "aime24_n1": os.path.join(d, "AIME24", "AIME24-origin.jsonl"),
+        "aime24_n2": os.path.join(d, "AIME24", "AIME24-combined-n2.jsonl"),
+        "aime25_n1": os.path.join(d, "AIME25", "AIME25-origin.jsonl"),
+        "aime25_n2": os.path.join(d, "AIME25", "AIME25-combined-n2.jsonl"),
     }
 
 

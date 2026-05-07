@@ -18,9 +18,9 @@ class DenseChainRewardManager:
     Dense reward manager for chained math reasoning.
 
     The manager keeps the public verl reward-manager interface unchanged while
-    making the reward terms robust to the R-HORIZON data variants found in this
-    repo: ground_truth, target, group_targets, num_problems, composed_query_num,
-    comma-joined targets, and nested boxed LaTeX answers.
+    making the reward terms robust to composed-reasoning data variants found in
+    this repo: ground_truth, target, group_targets, num_problems,
+    composed_query_num, comma-joined targets, and nested boxed LaTeX answers.
     """
 
     DEFAULT_REWARD_WEIGHTS = {

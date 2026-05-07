@@ -1,197 +1,128 @@
-<div align="center">
+# LongHorizon-RL
 
-<h1>
-  <img src="./assets/problem-solving.png" alt="logo" width="60" style="vertical-align:middle; margin-right:10px;">
-  R-HORIZON
-</h1>
+LongHorizon-RL studies how to train small and mid-sized language models for
+dependency-based long-horizon mathematical reasoning. The project focuses on
+process-aware reward shaping: instead of supervising only the final answer, it
+turns a long reasoning trajectory into several interpretable reward dimensions
+that can be used by reinforcement learning.
 
-<div align="center" style="line-height: 1;">
-  <h2 style="text-align: center; margin: 0;">How Far Can Your Large Reasoning Model Really Go in Breadth and Depth? </h2>
-</div>
-</div>
+The current implementation is built around composed mathematical reasoning
+samples. Each sample contains multiple sub-problems. Later sub-problems depend on
+answers produced by earlier ones, so the model must maintain intermediate state,
+use cross-step dependencies correctly, and still produce complete parseable
+answers.
 
-<br>
+## Motivation
 
+Long-Horizon Reasoning requires a model to maintain context, intermediate
+variables, and cross-step dependencies over an extended reasoning chain. This is
+harder than solving isolated single-step problems. It also creates a supervision
+problem: a reward based only on the final answer is too sparse, while requiring
+every sub-problem to be correct before giving any signal can make reinforcement
+learning unstable.
 
-<p align="center">
-  📃 <a href="https://arxiv.org/abs/2510.08189" target="_blank">Paper</a > • 🌐 <a href="https://reasoning-horizon.github.io/" target="_blank">Project Page</a > • 🤗 <a href="https://huggingface.co/datasets/meituan-longcat/R-HORIZON-training-data" target="_blank">Dataset</a >
-</p >
+This repository explores a denser alternative for mathematical reasoning tasks.
+The reward manager decomposes the quality of a generated trajectory into five
+process-level signals:
 
-R-HORIZON is a novel method designed to stimulate long-horizon reasoning behaviors in Large Reasoning Models (LRMs) through query composition. We transform isolated problems into complex multi-step reasoning scenarios, revealing that even the most advanced LRMs suffer significant performance degradation when facing interdependent problems that span long reasoning horizons.
+- **Progress reward**: whether each sub-problem is solved correctly and
+  efficiently.
+- **Complementarity reward**: whether later sub-problems correctly use previous
+  answers or explicit dependency variables.
+- **Negativity reward**: whether the trajectory avoids verifiable mistakes and
+  handles self-correction reasonably.
+- **Consistency reward**: whether stated answers are supported by their
+  reasoning process.
+- **Format reward**: whether the output is complete, stable, and easy to parse.
 
-![](./assets/mainfig.png)
+These signals are combined into a single reward for GRPO/PPO-style RL training.
 
-## 🔥 Releases
+## Repository Structure
 
-**[2025-10]**
-- 🎉 **R-HORIZON Benchmark** is now available! Test your LRMs on complex multi-horizon reasoning tasks.
-- 🤗 **Training and evaluation datasets** are available on Hugging Face: [R-HORIZON Dataset](https://huggingface.co/datasets/meituan-longcat/R-HORIZON-training-data)
-- 📄 **Paper released** on arXiv: [R-HORIZON: How Far Can Your Large Reasoning Model Really Go in Breadth and Depth?](https://arxiv.org/abs/2510.08189)
+```text
+data_contruction/          Scripts for filtering, key-variable selection, and composed sample construction
+evaluation/                Inference, extraction, and judging utilities
+training/                  verl-based RL training code and reward managers
+requirements.txt           Python dependencies used by the project scripts
+```
 
-
-## 🌟 Overview
-
-Recent advances in reasoning-focused language models (e.g., OpenAI o1, DeepSeek-R1) have demonstrated remarkable improvements through test-time scaling and long Chain-of-Thought (CoT). However, existing benchmarks primarily focus on immediate, single-horizon tasks, failing to adequately evaluate models' ability to handle complex, long-horizon scenarios.
-
-**Key challenges in current paradigms:**
-- **Limited evaluation scope**: Existing benchmarks confine themselves to isolated problems, missing the complexity of real-world multi-step reasoning
-- **Limited effective reasoning length**: Models struggle to maintain performance as reasoning chains grow longer
-- **Poor thinking budget allocation**: LRMs fail to appropriately distribute thinking resources across multiple interdependent problems
-
-To address these limitations, we introduce **R-HORIZON**, which:
-- Transforms isolated problems into **complex multi-step reasoning scenarios** through query composition
-- Establishes the **R-HORIZON Benchmark** comprising 6 representative datasets from mathematics, code generation, and agent applications
-- Enables **reinforcement learning with verified rewards (RLVR)** using long-horizon reasoning data
-
-![](./assets/method_fig.png)
-
-## 📖 Table of Contents
-
-- [🔥 Releases](#-releases)
-- [🌟 Overview](#-overview)
-- [📊 R-HORIZON Benchmark](#-r-horizon-benchmark)
-- [🚀 Training with R-HORIZON](#-training-with-r-horizon)
-- [Quick Start](#quick-start)
-  - [Installation](#installation)
-  - [Benchmark Evaluation](#benchmark-evaluation)
-  - [Training with R-HORIZON datasets](#training-with-r-horizon-datasets)
-- [Dataset](#dataset)
-  - [Dataset Construction](#dataset-construction)
-  - [Dataset on Hugging Face Hub](#dataset-on-hugging-face-hub)
-  - [Dataset Structure](#dataset-structure)
-- [Citation](#citation)
-
-## 📊 R-HORIZON Benchmark
-
-We evaluate 20+ state-of-the-art LRMs on the R-HORIZON Benchmark, revealing significant performance degradation as reasoning horizons increase:
-
-![](./assets/result_fig.png)
-
-**Key findings from our benchmark evaluation:**
-
-- **Universal performance degradation**: Even the most powerful models suffer severe drops as problem count increases. For instance, DeepSeek-R1 drops from 87.3% (single problem) to 24.6% (5 problems) on AIME25.
-
-- **Model size matters**: Larger models exhibit more resilience to multi-horizon challenges. R1-Qwen-7B drops from 93.6% to 0% when solving 16 problems, showing 34.1% more degradation than the 32B models.
-
-- **Task-dependent degradation**: Code generation tasks show steeper performance declines compared to mathematics. Many reasoning models lose their tool-calling abilities in web search scenarios, resulting in poor multi-step performance.
-
-## 🚀 Training with R-HORIZON
-
-Training with R-HORIZON composed data yields substantial improvements on both single and multi-horizon reasoning tasks:
-
-![](./assets/skywork_n1_n2_comparison.png)
-
-**Training results highlights:**
-
-- **Dual Performance Gains**: Training with 2-composed problems significantly improves both multi-horizon reasoning (+17.4 points on AIME24 n=2) and single-problem performance (+7.5 points on AIME24 original).
-
-- **Scalable Complexity**: Increasing composition complexity (n=4) enhances the model's ability to handle problems requiring more reasoning steps, achieving 50.6% on Math500 (n=8).
-
-| Models | MATH500 (Origin) | MATH500 (n=8) | AIME24 (Origin) | AIME24 (n=2) | AIME25 (Origin) | AIME25 (n=2) | AMC23 (Origin) | AMC23 (n=2) |
-|-----------------|------------------|---------------|-----------------|--------------|-----------------|--------------|----------------|-------------|
-| R1-Qwen-7B | 93.6 | 11.8 | 48.3 | 16.4 | 33.3 | 3.5 | 90.2 | 48.8 |
-| Baseline (n=1) | **95.6** | 8.4 | 57.9 | 16.7 | 47.9 | 5.1 | **95.9** | 55.0 |
-| R-HORIZON (n=2) | 95.4 | 21.4 | **65.4** | 34.1 | **49.6** | **10.0** | 94.1 | **80.6** |
-| R-HORIZON (n=4) | 94.6 | **50.6** | 62.9 | **34.8** | 45.4 | 8.1 | 91.9 | 79.1 |
-
-
-## Quick Start
-
-### Installation
+## Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/meituan-longcat/R-HORIZON.git
-cd R-HORIZON
+git clone <your-repository-url>
+cd <your-repository-directory>
 
-# Create conda environment
-conda create -n r-horizon python=3.10 -y
-conda activate r-horizon
+conda create -n longhorizon-rl python=3.10 -y
+conda activate longhorizon-rl
 
-# Install PyTorch
 pip3 install torch==2.4.0 --index-url https://download.pytorch.org/whl/cu124
 pip3 install flash-attn --no-build-isolation
-
-# Install additional dependencies
 pip install -r requirements.txt
 ```
 
-### Benchmark Evaluation
+Adjust the PyTorch and CUDA versions according to your hardware.
 
-1. Download the R-HORIZON Benchmark
+## Data Construction
 
-```bash
-# Download benchmark datasets
-python ./evaluation/data/download.py
-```
+The data construction pipeline converts independent mathematical problems into
+composed long-horizon samples with explicit answer dependencies.
 
-2. Create `evaluation/config.json` from the template (never commit real keys):
+### 1. Filter Integer-Valued Samples
 
 ```bash
-cp evaluation/config.example.json evaluation/config.json
+python data_contruction/step1_filt_integer_samples.py
 ```
 
-Edit `evaluation/config.json`: under `inference`, the **key name** is the `model_key` you pass to `run.sh` (default example uses `my-vllm-model`). Under `extract`, the default key is `extract-llm` (override with env `EXTRACT_MODEL_NAME` if you rename it).
+This step keeps samples whose inputs contain valid integer variables and whose
+targets are pure integers. Ambiguous numeric expressions such as fractions,
+floats, or unresolved LaTeX commands are filtered out.
 
-3. Run a vLLM server (paths and flags depend on your hardware and model)
+### 2. Select Key Variables
 
 ```bash
-vllm serve /path/to/your/model \
-    --host 0.0.0.0 \
-    --port 8000 \
-    --served-model-name my-vllm-model \
-    --dtype auto \
-    --pipeline-parallel-size 1 \
-    --tensor-parallel-size 1 \
-    --trust-remote-code \
-    --max-model-len 131072 \
-    --gpu-memory-utilization 0.9 \
-    --enable-chunked-prefill
+python data_contruction/step2_select_key_varible.py
 ```
 
-4. Evaluate your model
+This step identifies key variables: integers in the problem statement that
+strongly affect the final answer. Configure the API endpoint and key in the
+script or through your local environment before running it.
 
-The third argument is the `model_key` defined under `inference` in `config.json`.
+### 3. Compose Dependent Problems
 
 ```bash
-sh evaluation/run.sh {input_file} {output_dir} {model_key}
-# example
-sh evaluation/run.sh evaluation/data/R-HORIZON-Math500/Math500-combined-n2.jsonl evaluation/result my-vllm-model
+python data_contruction/step3_combine_problems.py
 ```
 
-### Training with R-HORIZON datasets
-1. Download composed training data
+This step links multiple sub-problems into one long-horizon sample. A later
+problem can use the previous answer as an intermediate variable, forming a
+verifiable cross-problem dependency chain.
 
-```python
-from huggingface_hub import snapshot_download
+## Training
 
-snapshot_download(
-    repo_id="meituan-longcat/R-HORIZON-training-data",
-    repo_type="dataset",
-    local_dir="./training/data",
-)
-```
+The training code is based on `verl` and supports GRPO-style optimization with
+the process-aware dense reward manager.
 
-2. Launch training (example: single-node Ray + GRPO; adjust `MODEL_PATH`, data paths, and GPU counts)
-
-From the `training/` directory, after preparing Parquet/PKL data under `training/data/`:
+Prepare your training and validation data under `training/data/`, then launch a
+Ray job from the `training/` directory:
 
 ```bash
 export MODEL_PATH="/path/to/your/base/model"
-export TRAIN_DATA_DIR="./training/data"
-export OUTPUT_DIR="./training/checkpoints/my-run"
+export TRAIN_DATA_DIR="./data"
+export OUTPUT_DIR="./checkpoints/process-aware-run"
 mkdir -p "$OUTPUT_DIR"
 
 ray start --head --port=29500 --num-gpus=8 --include-dashboard=false
 
 ray job submit \
   --address "127.0.0.1:29500" \
-  --runtime-env="./runtime_env.yaml" \
+  --runtime-env="./verl/trainer/runtime_env.yaml" \
   --working-dir="." \
   -- python3 -m verl.trainer.main_ppo \
+    reward_model.reward_manager=dense_chain \
     algorithm.adv_estimator=grpo \
+    actor_rollout_ref.actor.use_kl_loss=True \
     data.train_files='["'"${TRAIN_DATA_DIR}/your_train.parquet"'"]' \
-    data.val_files='["'"${TRAIN_DATA_DIR}/aime24.parquet"'"]' \
+    data.val_files='["'"${TRAIN_DATA_DIR}/your_val.parquet"'"]' \
     actor_rollout_ref.model.path="${MODEL_PATH}" \
     trainer.default_local_dir="${OUTPUT_DIR}" \
     trainer.n_gpus_per_node=8 \
@@ -200,83 +131,89 @@ ray job submit \
 ray stop
 ```
 
-Override hyperparameters (batch size, sequence length, rollout `n`, etc.) as needed; see `training/verl/trainer/config/ppo_trainer.yaml` and Hydra overrides used in your setup.
+Key reward weights are configured in
+`training/verl/trainer/config/ppo_trainer.yaml`:
 
-
-
-## Dataset
-### Dataset Construction
-Step 1: Filter Samples with Valid Integers  
-```bash
-# Purpose: Retain samples containing valid integers in input text and pure integer targets, excluding ambiguous numeric expressions (e.g., floats, fractions, LaTeX commands).  
-python step1_filt_integer_samples.py
+```yaml
+reward_model:
+  reward_manager: dense_chain
+  dense_reward:
+    reward_weights:
+      prog: 0.4
+      comp: 0.2
+      neg: 0.15
+      cons: 0.15
+      form: 0.1
 ```
 
-Step 2: Identify Key Variables
+The dense reward manager can use an OpenAI-compatible judge for selected process
+signals. If no judge API key is configured, local fallback heuristics are used so
+that all reward dimensions still produce valid scores.
+
+## Evaluation
+
+Create a local evaluation config from the template:
+
 ```bash
-# Purpose: select "key variables" (critical integers that significantly affect problem outcomes)
-# configure API credentials in the script (replace YOUR_API_KEY)
-python step2_select_key_variable.py
+cp evaluation/config.example.json evaluation/config.json
 ```
 
-Step 3: Combine into Chained Reasoning Problems
+Edit `evaluation/config.json` with your inference endpoint, model name, and API
+keys. Then run:
+
 ```bash
-# Purpose: Generate multi-horizon chained problems where each step's key variable depends on the previous step's answer.
-python step3_combine_problems.py
+sh evaluation/run.sh evaluation/data/<dataset>/<file>.jsonl evaluation/result my-vllm-model
 ```
 
-### Dataset on Hugging Face Hub
-The R-HORIZON training datasets and evaluation benchmark are available on Hugging Face Hub:
+For training-time AIME-style checks, the default lookup paths are:
 
-| Dataset Type | Dataset Name                  | Hugging Face Link                                                                 |
-|--------------|-------------------------------|-----------------------------------------------------------------------------------|
-| Evaluation   | R-HORIZON-Math500             | [link](https://huggingface.co/datasets/meituan-longcat/R-HORIZON-Math500)             |
-| Evaluation   | R-HORIZON-AIME24              | [link](https://huggingface.co/datasets/meituan-longcat/R-HORIZON-AIME24)               |
-| Evaluation   | R-HORIZON-AIME25              | [link](https://huggingface.co/datasets/meituan-longcat/R-HORIZON-AIME25)               |
-| Evaluation   | R-HORIZON-AMC23               | [link](https://huggingface.co/datasets/meituan-longcat/R-HORIZON-AMC23)               |
-| Evaluation   | R-HORIZON-Websearch           | [link](https://huggingface.co/datasets/meituan-longcat/R-HORIZON-Websearch)            |
-| Training     | R-HORIZON-training-data       | [link](https://huggingface.co/datasets/meituan-longcat/R-HORIZON-training-data)        |
+```text
+evaluation/data/AIME24/AIME24-origin.jsonl
+evaluation/data/AIME24/AIME24-combined-n2.jsonl
+evaluation/data/AIME25/AIME25-origin.jsonl
+evaluation/data/AIME25/AIME25-combined-n2.jsonl
+```
 
+You can modify these paths in
+`training/verl/trainer/aime_eval_metrics.py` if your local evaluation files use a
+different layout.
 
+## Data Format
 
-### Dataset Structure
+Each composed sample is expected to contain a chat prompt plus metadata used by
+the reward manager:
 
 ```json
 {
-  "input": "[1-N linked problems + solving instructions (with [variablek]/[answerk] placeholders)]",
-  "instanceId": "[Unique ID for this instance]",
-  "origin_instanceIds": "[List of original problem IDs]",
-  "target": "[List of final answers, e.g., [answer1, answer2]]",
-  "num_problems": "[Total problems, e.g., 2]",
-  "selected_variables": [
+  "prompt": [
     {
-      "number": "[Key variable from problem]",
-      "context": "[Context of the number]",
-      "text": "[Text of the number]",
-      "is_independent": "[true/false]",
-      "is_in_math_env": "[true/false]"
+      "role": "user",
+      "content": "Problem 1: ...\n\nProblem 2: ..."
     }
-  ]
+  ],
+  "reward_model": {
+    "style": "rule",
+    "ground_truth": ["answer1,answer2"]
+  },
+  "extra_info": {
+    "composed_query_num": 2,
+    "dependencies": [["variable2", "answer1 + c"]]
+  }
 }
 ```
+
+The reward manager also accepts several equivalent target layouts, including
+`target`, `group_targets`, comma-separated targets, and nested boxed LaTeX
+answers.
+
+## Current Scope
+
+This repository currently focuses on mathematical long-horizon reasoning with
+Qwen-style causal language models and GRPO training. The implementation is still
+research-oriented: paths, data names, and launch parameters should be adjusted to
+your local cluster and dataset layout.
 
 ## Citation
-If you find R-HORIZON helpful for your research, please cite our paper:
 
-```bibtex
-@misc{lu2025rhorizonfarlargereasoning,
-      title={R-Horizon: How Far Can Your Large Reasoning Model Really Go in Breadth and Depth?}, 
-      author={Yi Lu and Jianing Wang and Linsen Guo and Wei He and Hongyin Tang and Tao Gui and Xuanjing Huang and Xuezhi Cao and Wei Wang and Xunliang Cai},
-      year={2025},
-      eprint={2510.08189},
-      archivePrefix={arXiv},
-      primaryClass={cs.AI},
-      url={https://arxiv.org/abs/2510.08189}, 
-}
-```
-
-## 📩 Contact
-Please contact us at <a href="mailto:longcat-team@meituan.com">longcat-team@meituan.com</a> or join our WeChat Group if you have any questions.
-
-#### WeChat Group
-<img src="https://github.com/meituan-longcat/LongCat-Flash-Thinking/blob/main/figures/wechat_qrcode.png" width="200px">
+The paper draft is still in progress. Add the final citation here once the title,
+author list, and venue information are fixed.

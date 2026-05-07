@@ -267,7 +267,8 @@ def equal_judgement(queries, fo):
 def parse_labels_field(labels):
     """
     将原始数据中的 target 字段统一转换为“每小题一个答案”的列表。
-    R-HORIZON-Math500 数据集中，target 形如 ["64,10,-1,22,3,5,56,49"]，
+    Some composed math datasets store target as a single comma-separated string,
+    for example ["64,10,-1,22,3,5,56,49"].
     需要按逗号拆分后再逐一与提取出的答案对齐。
     """
     # 常见情况：是只有一个元素的列表，里面是一整行用逗号分隔的答案
