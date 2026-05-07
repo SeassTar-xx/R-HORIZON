@@ -1,5 +1,6 @@
 import argparse 
 import json
+import re
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
 import concurrent.futures
@@ -7,6 +8,47 @@ import threading
 import os
 import requests
 import time
+
+# (base_url, model_name) -> int | None — only filled when /v1/models exposes max_model_len (e.g. vLLM).
+_OPENAI_MAX_MODEL_LEN_CACHE = {}
+
+# 本地 vLLM 长生成时默认 600s 读超时易中断整条评测链；可通过环境变量调大（不改 config 里的 max_tokens）。
+_INFERENCE_HTTP_CONNECT_TIMEOUT = int(os.environ.get("INFERENCE_HTTP_CONNECT_TIMEOUT", "120"))
+_INFERENCE_HTTP_READ_TIMEOUT = int(os.environ.get("INFERENCE_HTTP_READ_TIMEOUT", "7200"))
+
+
+def _chat_completions_url_to_models_url(chat_url: str):
+    cu = chat_url.rstrip("/")
+    suf = "/v1/chat/completions"
+    if cu.endswith(suf):
+        return cu[: -len(suf)] + "/v1/models"
+    return None
+
+
+def _probe_openai_max_model_len(base_url: str, model_name: str):
+    key = (base_url, model_name)
+    if key in _OPENAI_MAX_MODEL_LEN_CACHE:
+        return _OPENAI_MAX_MODEL_LEN_CACHE[key]
+    models_url = _chat_completions_url_to_models_url(base_url)
+    if not models_url:
+        _OPENAI_MAX_MODEL_LEN_CACHE[key] = None
+        return None
+    try:
+        r = requests.get(models_url, timeout=5)
+        if r.status_code != 200:
+            _OPENAI_MAX_MODEL_LEN_CACHE[key] = None
+            return None
+        payload = r.json()
+        for row in payload.get("data") or []:
+            if row.get("id") == model_name and row.get("max_model_len") is not None:
+                mlen = int(row["max_model_len"])
+                _OPENAI_MAX_MODEL_LEN_CACHE[key] = mlen
+                return mlen
+    except Exception:
+        pass
+    _OPENAI_MAX_MODEL_LEN_CACHE[key] = None
+    return None
+
 
 def do_post(url, data, headers, model_name):
     print(url)
@@ -16,7 +58,12 @@ def do_post(url, data, headers, model_name):
     while retry_times <= 3:
         response = None
         try:
-            response = requests.post(url, json=data, headers=headers, timeout=(60, 300))
+            response = requests.post(
+                url,
+                json=data,
+                headers=headers,
+                timeout=(_INFERENCE_HTTP_CONNECT_TIMEOUT, _INFERENCE_HTTP_READ_TIMEOUT),
+            )
         except requests.exceptions.Timeout as e:
             cur_max = int(data.get("max_tokens", 0) or 0)
             if cur_max > max_tokens_floor:
@@ -62,7 +109,16 @@ def do_post(url, data, headers, model_name):
                 err_text = response.text or ""
             except Exception:
                 err_text = ""
-            if "maximum context length" in err_text or "max_tokens" in err_text:
+            m = re.search(r"max_total_tokens=(\d+)", err_text)
+            if m:
+                lim = int(m.group(1))
+                slack = 4096
+                target = max(context_safe_floor, lim - slack)
+                cur_max = int(data.get("max_tokens", 0) or 0)
+                if cur_max > target:
+                    data["max_tokens"] = target
+                    print(f"warn!! {model_name} vLLM max_model_len={lim}, set max_tokens {cur_max}->{target}")
+            elif "maximum context length" in err_text or "max_tokens" in err_text:
                 cur_max = int(data.get("max_tokens", 0) or 0)
                 if cur_max > context_safe_floor:
                     next_max = max(context_safe_floor, cur_max - 2048)
@@ -83,10 +139,23 @@ def request_response(key, messages, config):
         request_params = config['params'].copy()
     else:
         request_params = {}
-    # Keep paper-level config in file, but avoid deterministic vLLM 400 retries
-    # when max_tokens hits context-window boundary.
-    if int(request_params.get("max_tokens", 0) or 0) >= 65536:
-        request_params["max_tokens"] = 63488
+    # Keep config max_tokens as the paper baseline (65536); only shrink per-request when
+    # the OpenAI-compatible server exposes max_model_len (vLLM /v1/models). HF local server
+    # typically has no such field and keeps full requested budget.
+    mt = int(request_params.get("max_tokens", 0) or 0)
+    if mt >= 65536:
+        mt = 63488
+    mlen = _probe_openai_max_model_len(config["base_url"], config["model_name"])
+    if mlen is not None:
+        slack = 4096
+        capped = max(1024, min(mt, mlen - slack))
+        if capped < mt:
+            print(
+                f"info: server max_model_len={mlen}, cap max_tokens {mt}->{capped} for this process only"
+            )
+        request_params["max_tokens"] = capped
+    else:
+        request_params["max_tokens"] = mt
     # OpenAI-compatible chat request format
     request_params['model'] = config['model_name']
     request_params['messages'] = [
@@ -176,6 +245,8 @@ if __name__ == '__main__':
         cnt += 1
     print(f"{cnt} in total, load {len(query_lst)} new queries")
 
+    out_abs = os.path.abspath(args.output)
+    print(f"[inference] append results to: {out_abs}")
     with open(args.output, "a") as fo:
         inference(query_lst, fo, config, max_workers=max(1, args.max_workers))
 

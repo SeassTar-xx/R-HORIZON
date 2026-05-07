@@ -15,7 +15,7 @@ data:
 actor_rollout_ref:
   hybrid_engine: True
   model:
-    path: ~/models/deepseek-llm-7b-chat
+    path: ~/models/your-base-model
     external_lib: null
     override_config: { }
     enable_gradient_checkpointing: True
@@ -109,7 +109,7 @@ critic:
     warmup_style: constant  # select from constant/cosine
     total_training_steps: -1  # must be override by program
   model:
-    path: ~/models/deepseek-llm-7b-chat
+    path: ~/models/your-base-model
     tokenizer_path: ${actor_rollout_ref.model.path}
     override_config: { }
     external_lib: ${actor_rollout_ref.model.external_lib}
@@ -174,10 +174,10 @@ reward_model:
     progress_partial_credit: True
     enable_llm_judge: True
     max_workers: 3
-    base_url: https://api.deepseek.com/v1/chat/completions
-    model_name: deepseek-reasoner
-    # 从环境变量读取；正式脚本会从 evaluation/config.json 注入 DEEPSEEK_API_KEY，勿把密钥写进仓库。
-    api_key: ${oc.env:DEEPSEEK_API_KEY,""}
+    base_url: https://api.openai.com/v1/chat/completions
+    model_name: gpt-4o-mini
+    # 优先读 LLM_JUDGE_API_KEY；兼容旧环境变量 DEEPSEEK_API_KEY。勿把密钥写进仓库。
+    api_key: ${oc.env:LLM_JUDGE_API_KEY,""}
     temperature: 0.0
     max_tokens: 16000
     timeout: 30

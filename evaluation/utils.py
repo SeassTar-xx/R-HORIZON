@@ -6,7 +6,7 @@ import json
 def do_post(url, data, headers, model_name):
     """
     更健壮的 POST 封装：
-    - 总是打印 status_code 和部分返回内容，方便排查 DeepSeek 接口错误
+    - 总是打印 status_code 和部分返回内容，方便排查远程 Chat API 错误
     - 正确处理 JSON 解析失败的情况
     - 仅在 HTTP 200 且返回中包含 choices 字段时认为成功
     """
@@ -23,7 +23,7 @@ def do_post(url, data, headers, model_name):
                 print(f"[{model_name}] JSON 解析失败: {e}, status={status}, raw={raw_text[:300]}")
                 resp_json = None
 
-            # 只在 200 且返回中有 choices 时认为成功（DeepSeek/OpenAI chat 标准格式）
+            # 只在 200 且返回中有 choices 时认为成功（OpenAI 兼容 chat 标准格式）
             if status == 200 and isinstance(resp_json, dict) and resp_json.get("choices"):
                 return resp_json
 

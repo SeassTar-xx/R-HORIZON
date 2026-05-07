@@ -50,12 +50,15 @@ class DenseChainRewardManager:
         # Looser matching fixes log pattern "prog_reward always 0" when \\boxed content differs cosmetically.
         self.progress_partial_credit = bool(cfg.get("progress_partial_credit", True))
 
-        # LLM judge config (DeepSeek by default), fully overridable.
+        # LLM judge：OpenAI 兼容 Chat Completions，可通过 YAML / 环境变量覆盖。
         self.enable_llm_judge = bool(cfg.get("enable_llm_judge", True))
         self.max_workers = int(cfg.get("max_workers", 3))
-        self.llm_base_url = cfg.get("base_url", "https://api.deepseek.com/v1/chat/completions")
-        self.llm_model_name = cfg.get("model_name", "deepseek-reasoner")
-        self.llm_api_key = (cfg.get("api_key") or "").strip() or os.environ.get("DEEPSEEK_API_KEY", "").strip()
+        self.llm_base_url = cfg.get("base_url", "https://api.openai.com/v1/chat/completions")
+        self.llm_model_name = cfg.get("model_name", "gpt-4o-mini")
+        _key = (cfg.get("api_key") or "").strip()
+        self.llm_api_key = _key or os.environ.get("LLM_JUDGE_API_KEY", "").strip() or os.environ.get(
+            "DEEPSEEK_API_KEY", ""
+        ).strip()
         self.llm_temperature = float(cfg.get("temperature", 0.0))
         self.llm_max_tokens = int(cfg.get("max_tokens", 16000))
         self.llm_timeout = int(cfg.get("timeout", 30))

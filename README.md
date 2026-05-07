@@ -125,47 +125,21 @@ pip install -r requirements.txt
 python ./evaluation/data/download.py
 ```
 
-2. Modify config.json under evaluation directory
-```json
-{
-    "inference": {
-        // model_key (e.g. r1-distill-qwen7b) is for run.sh
-        "r1-distill-qwen7b": {
-            // the ip and port used in vllm server
-            "base_url": "http://{Your IP and Port}/v1/completions",
-            "api_key": "EMPTY",
-            // model_name is corresponding to the modelname in vllm server
-            "model_name": "{vllm's modelname}", 
-            "params": {
-                "temperature": 1.0,
-                "top_p": 0.95,
-                "top_k": 10,
-                "max_tokens": 65536
-            },
-            "prompt_prefix": "<|im_start|>user:\n",
-            "prompt_suffix": "\n<|im_end|>\n<|im_start|>assistant:\n"
-        }
-    },
-    "extract": {
-        "gpt-4.1": {
-            "model_name": "gpt-4.1",
-            "base_url": "{OpenAI's baseurl}",
-            "api_key": "{Your API key}",
-            "params": {
-                "temperature": 0.0,
-                "max_tokens": 16000
-            }
-        }
-    }
-}
+2. Create `evaluation/config.json` from the template (never commit real keys):
+
+```bash
+cp evaluation/config.example.json evaluation/config.json
 ```
 
-3. Run a vllm server
+Edit `evaluation/config.json`: under `inference`, the **key name** is the `model_key` you pass to `run.sh` (default example uses `my-vllm-model`). Under `extract`, the default key is `extract-llm` (override with env `EXTRACT_MODEL_NAME` if you rename it).
+
+3. Run a vLLM server (paths and flags depend on your hardware and model)
+
 ```bash
-vllm serve /home/data/XuXin/qwen \
+vllm serve /path/to/your/model \
     --host 0.0.0.0 \
     --port 8000 \
-    --served-model-name qwen3-4b \
+    --served-model-name my-vllm-model \
     --dtype auto \
     --pipeline-parallel-size 1 \
     --tensor-parallel-size 1 \
@@ -175,13 +149,14 @@ vllm serve /home/data/XuXin/qwen \
     --enable-chunked-prefill
 ```
 
-4. Evaluate your model 
+4. Evaluate your model
 
-Here is a bash example, and model_key is defined in config.json
+The third argument is the `model_key` defined under `inference` in `config.json`.
+
 ```bash
 sh evaluation/run.sh {input_file} {output_dir} {model_key}
 # example
-sh evaluation/run.sh evaluation/data/R-HORIZON-Math500/Math500-combined-n2.jsonl evaluation/result qwen3-4b
+sh evaluation/run.sh evaluation/data/R-HORIZON-Math500/Math500-combined-n2.jsonl evaluation/result my-vllm-model
 ```
 
 ### Training with R-HORIZON datasets
@@ -197,12 +172,35 @@ snapshot_download(
 )
 ```
 
-2. Launch training
+2. Launch training (example: single-node Ray + GRPO; adjust `MODEL_PATH`, data paths, and GPU counts)
+
+From the `training/` directory, after preparing Parquet/PKL data under `training/data/`:
 
 ```bash
-# Train with R-HORIZON using GRPO algorithm
-bash ./training/scripts/train/skywork-or1-rlvr-math-training-7b-40k.sh
+export MODEL_PATH="/path/to/your/base/model"
+export TRAIN_DATA_DIR="./training/data"
+export OUTPUT_DIR="./training/checkpoints/my-run"
+mkdir -p "$OUTPUT_DIR"
+
+ray start --head --port=29500 --num-gpus=8 --include-dashboard=false
+
+ray job submit \
+  --address "127.0.0.1:29500" \
+  --runtime-env="./runtime_env.yaml" \
+  --working-dir="." \
+  -- python3 -m verl.trainer.main_ppo \
+    algorithm.adv_estimator=grpo \
+    data.train_files='["'"${TRAIN_DATA_DIR}/your_train.parquet"'"]' \
+    data.val_files='["'"${TRAIN_DATA_DIR}/aime24.parquet"'"]' \
+    actor_rollout_ref.model.path="${MODEL_PATH}" \
+    trainer.default_local_dir="${OUTPUT_DIR}" \
+    trainer.n_gpus_per_node=8 \
+    trainer.nnodes=1
+
+ray stop
 ```
+
+Override hyperparameters (batch size, sequence length, rollout `n`, etc.) as needed; see `training/verl/trainer/config/ppo_trainer.yaml` and Hydra overrides used in your setup.
 
 
 

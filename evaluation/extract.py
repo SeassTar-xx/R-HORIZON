@@ -11,13 +11,13 @@ from utils import request_response
 
 
 
-def inference(queries, fo, config, max_workers = 1):
+def inference(queries, fo, config, max_workers=1):
     lock = threading.Lock()
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = []
 
         for key, value in tqdm(queries):
-            futures.append((executor.submit(request_response, key, value, config)))
+            futures.append(executor.submit(request_response, key, value, config))
 
         for future in tqdm(concurrent.futures.as_completed(futures)):
             result = None
@@ -40,7 +40,13 @@ if __name__ == '__main__':
     parser.add_argument('--input', type=str, default=None)
     parser.add_argument('--output', type=str, default='output.json')
     parser.add_argument('--config', type=str, default='evaluation/config.json')
-    parser.add_argument('--model_name', type=str, default='deepseek-reasoner')
+    parser.add_argument('--model_name', type=str, default='extract-llm')
+    parser.add_argument('--max_workers', type=int, default=1)
+    parser.add_argument(
+        '--rewrite',
+        action='store_true',
+        help='truncate output JSONL and re-extract every row from input (fixes duplicate keys from parallel runs)',
+    )
     args = parser.parse_args()
     print(args)
     model_configs = json.load(open(args.config, 'r'))
@@ -49,6 +55,9 @@ if __name__ == '__main__':
     config = model_configs['extract'][args.model_name]
 
     exists = set()
+    if args.rewrite and os.path.exists(args.output):
+        os.remove(args.output)
+        print(f"[extract] --rewrite: removed {args.output}")
     if os.path.exists(args.output):
         for line in tqdm(open(args.output)):
             item = json.loads(line)
@@ -79,4 +88,4 @@ if __name__ == '__main__':
     print(f"{cnt} in total, load {len(query_lst)} new queries")
 
     with open(args.output, "a") as fo:
-        inference(query_lst, fo, config)
+        inference(query_lst, fo, config, max_workers=max(1, args.max_workers))
