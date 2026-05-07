@@ -120,7 +120,6 @@ ray job submit \
   -- python3 -m verl.trainer.main_ppo \
     reward_model.reward_manager=dense_chain \
     algorithm.adv_estimator=grpo \
-    actor_rollout_ref.actor.use_kl_loss=True \
     data.train_files='["'"${TRAIN_DATA_DIR}/your_train.parquet"'"]' \
     data.val_files='["'"${TRAIN_DATA_DIR}/your_val.parquet"'"]' \
     actor_rollout_ref.model.path="${MODEL_PATH}" \
@@ -131,10 +130,33 @@ ray job submit \
 ray stop
 ```
 
-Key reward weights are configured in
+The default training configuration follows the experiment setting used in the
+paper draft:
+
+- total training steps: `800`
+- actor learning rate: `5e-7`
+- rollout temperature: `0.8`
+- training batch size: `4` prompts per step
+- group size: `16` candidate responses per prompt
+
+Here, batch size denotes the number of prompts used in each training step, while
+group size denotes the number of candidate responses sampled for each prompt.
+
+The process-aware reward weights are configured in
 `training/verl/trainer/config/ppo_trainer.yaml`:
 
 ```yaml
+data:
+  train_batch_size: 4
+
+actor_rollout_ref:
+  actor:
+    optim:
+      lr: 5e-7
+  rollout:
+    temperature: 0.8
+    n: 16
+
 reward_model:
   reward_manager: dense_chain
   dense_reward:
@@ -144,6 +166,9 @@ reward_model:
       neg: 0.15
       cons: 0.15
       form: 0.1
+
+trainer:
+  total_training_steps: 800
 ```
 
 The dense reward manager can use an OpenAI-compatible judge for selected process
