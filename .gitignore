@@ -8,6 +8,7 @@ evaluation/result_all/
 
 # --- 训练产物与缓存（本地 / 数据盘）---
 training/checkpoints
+training/sample_runs/
 outputs/
 wandb/
 *.log
