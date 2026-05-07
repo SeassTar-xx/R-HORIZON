@@ -1,29 +1,20 @@
 {
   "inference": {
-    "my-vllm-model": {
+    "qwen3-4b": {
       "base_url": "http://127.0.0.1:8000/v1/chat/completions",
-      "model_name": "my-vllm-model",
+      "model_name": "qwen3-4b",
       "api_key": "EMPTY",
       "params": {
         "temperature": 0.0,
         "max_tokens": 65536
       }
-    },
-    "qwen3-8b": {
-      "base_url": "http://127.0.0.1:8000/v1/chat/completions",
-      "model_name": "qwen3-8b",
-      "api_key": "EMPTY",
-      "params": {
-        "temperature": 0.0,
-        "max_tokens": 16000
-      }
     }
   },
   "extract": {
-    "extract-llm": {
-      "base_url": "https://api.openai.com/v1/chat/completions",
-      "model_name": "gpt-4.1-mini",
-      "api_key": "YOUR_EXTRACT_API_KEY",
+    "qwen3-4b": {
+      "base_url": "http://127.0.0.1:8000/v1/chat/completions",
+      "model_name": "qwen3-4b",
+      "api_key": "EMPTY",
       "params": {
         "temperature": 0.0,
         "max_tokens": 16000

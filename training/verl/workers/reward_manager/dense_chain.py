@@ -52,8 +52,8 @@ class DenseChainRewardManager:
 
         self.enable_llm_judge = bool(cfg.get("enable_llm_judge", True))
         self.max_workers = int(cfg.get("max_workers", 3))
-        self.llm_base_url = cfg.get("base_url", "https://api.openai.com/v1/chat/completions")
-        self.llm_model_name = cfg.get("model_name", "gpt-4o-mini")
+        self.llm_base_url = cfg.get("base_url", "http://127.0.0.1:8000/v1/chat/completions")
+        self.llm_model_name = cfg.get("model_name", "qwen3-4b")
         key = str(cfg.get("api_key") or "").strip()
         self.llm_api_key = (
             key

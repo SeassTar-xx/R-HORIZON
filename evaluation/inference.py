@@ -212,7 +212,7 @@ if __name__ == '__main__':
     parser.add_argument('--input', type=str, default=None)
     parser.add_argument('--output', type=str, default='output.json')
     parser.add_argument('--config', type=str, default='evaluation/config.json')
-    parser.add_argument('--model_name', type=str, default='THUDM/chatglm-6b')
+    parser.add_argument('--model_name', type=str, default='qwen3-4b')
     parser.add_argument('--max_workers', type=int, default=1)
     args = parser.parse_args()
     print(args)

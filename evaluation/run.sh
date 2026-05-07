@@ -31,7 +31,7 @@ fi
 mkdir -p "$OUTPUT_DIR"
 
 # 抽取阶段使用的 config.json 中 extract.* 的键名（默认与 config.example.json 一致）
-EXTRACT_MODEL_NAME="${EXTRACT_MODEL_NAME:-extract-llm}"
+EXTRACT_MODEL_NAME="${EXTRACT_MODEL_NAME:-qwen3-4b}"
 
 # Step1 Inference（SKIP_INFERENCE=1 时跳过，仅跑 extract+judge，用于补跑抽取）
 SKIP_INFERENCE="${SKIP_INFERENCE:-0}"

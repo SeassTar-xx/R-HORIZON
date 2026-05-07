@@ -11,7 +11,7 @@ data:
   balance_dp_token: False
   chat_template: null
 model:
-  partial_pretrain: ~/models/gemma-1.1-7b-it
+  partial_pretrain: ~/models/qwen3-4b
   fsdp_config:
     wrap_policy:
       min_num_params: 0
