@@ -495,6 +495,7 @@ class RayPPOTrainer(object):
                                          prompt_key=self.config.data.prompt_key,
                                          max_prompt_length=self.config.data.max_prompt_length,
                                          min_composed_query_num=self.config.data.get('min_composed_query_num', 1),
+                                         max_composed_query_num=self.config.data.get('max_composed_query_num', None),
                                          filter_prompts=True,
                                          return_raw_chat=self.config.data.get('return_raw_chat', False),
                                          truncation='error')
@@ -523,6 +524,7 @@ class RayPPOTrainer(object):
                                        prompt_key=self.config.data.prompt_key,
                                        max_prompt_length=self.config.data.max_prompt_length,
                                        min_composed_query_num=self.config.data.get('min_composed_query_num', 1),
+                                       max_composed_query_num=self.config.data.get('max_composed_query_num', None),
                                        filter_prompts=True,
                                        return_raw_chat=self.config.data.get('return_raw_chat', False),
                                        truncation='error')
@@ -957,6 +959,8 @@ class RayPPOTrainer(object):
 
         rf = self.reward_fn
         if hasattr(rf, '_last_step_dense_means') and getattr(rf, '_last_step_dense_means', None):
+            for _k, _v in rf._last_step_dense_means.items():
+                metrics[f'dense_batch_mean/{_k}'] = float(_v)
             self._dense_reward_ma.append(dict(rf._last_step_dense_means))
         rl = metrics.get('response_length/mean')
         if rl is not None:
@@ -1359,8 +1363,15 @@ class RayPPOTrainer(object):
                             val_metrics = self._validate_with_temperatures()
                         metrics.update(val_metrics)
 
-                    if self.config.trainer.save_freq > 0 and \
-                            self.global_steps % self.config.trainer.save_freq == 0:
+                    save_steps_cfg = self.config.trainer.get('save_steps', None)
+                    save_steps_list = []
+                    if save_steps_cfg is not None:
+                        save_steps_list = list(OmegaConf.to_container(save_steps_cfg, resolve=True))
+                    sf = int(self.config.trainer.save_freq)
+                    should_save_ckpt = (sf > 0 and self.global_steps % sf == 0) or (
+                        self.global_steps in save_steps_list
+                    )
+                    if should_save_ckpt:
                         with _timer('save_checkpoint', timing_raw):
                             self._save_checkpoint()
 

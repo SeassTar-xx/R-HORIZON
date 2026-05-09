@@ -28,6 +28,30 @@ from verl.utils.model import compute_position_id_with_mask
 import verl.utils.torch_functional as verl_F
 
 
+def composed_query_num_from_row(row_dict: dict) -> int:
+    """Infer composed chain length n from a dataset row (parquet / pickle)."""
+    direct = row_dict.get("composed_query_num", None)
+    if isinstance(direct, (int, np.integer)):
+        return int(direct)
+    if isinstance(direct, str) and direct.isdigit():
+        return int(direct)
+
+    extra = row_dict.get("extra_info", {}) or {}
+    if isinstance(extra, dict):
+        for key in ("composed_query_num", "num_problems", "n_problems"):
+            v = extra.get(key, None)
+            if isinstance(v, (int, np.integer)):
+                return int(v)
+            if isinstance(v, str) and v.isdigit():
+                return int(v)
+
+    reward_model = row_dict.get("reward_model", {}) or {}
+    gt = reward_model.get("ground_truth", None) if isinstance(reward_model, dict) else None
+    if isinstance(gt, (list, tuple)):
+        return len(gt)
+    return 1
+
+
 def collate_fn(data_list: list[dict]) -> dict:
     tensors = {}
     non_tensors = {}
@@ -66,6 +90,7 @@ class RLHFDataset(Dataset):
                  prompt_key='prompt',
                  max_prompt_length=1024,
                  min_composed_query_num=1,
+                 max_composed_query_num=None,
                  filter_prompts=True,
                  cache_dir='~/.cache/verl/rlhf',
                  chat_template_func=None,
@@ -82,6 +107,7 @@ class RLHFDataset(Dataset):
         self.prompt_key = prompt_key
         self.max_prompt_length = max_prompt_length
         self.min_composed_query_num = min_composed_query_num
+        self.max_composed_query_num = max_composed_query_num
         self.filter_prompts = filter_prompts
 
         self.return_raw_chat = return_raw_chat
@@ -115,35 +141,19 @@ class RLHFDataset(Dataset):
 
         print(f'original dataset len: {len(self.dataframe)}')
 
-        # Optional filter: keep only chained composite queries (n >= min_composed_query_num).
-        if self.min_composed_query_num > 1:
-            def _extract_n(row):
-                direct = row.get("composed_query_num", None)
-                if isinstance(direct, (int, np.integer)):
-                    return int(direct)
-                if isinstance(direct, str) and direct.isdigit():
-                    return int(direct)
+        # Optional filter: composed_query_num in [min, max] (max omitted => no upper bound).
+        if self.min_composed_query_num > 1 or self.max_composed_query_num is not None:
+            def _keep(doc) -> bool:
+                n = composed_query_num_from_row(doc.to_dict())
+                if n < self.min_composed_query_num:
+                    return False
+                if self.max_composed_query_num is not None and n > self.max_composed_query_num:
+                    return False
+                return True
 
-                extra = row.get("extra_info", {}) or {}
-                n_from_extra = extra.get("composed_query_num", None) if isinstance(extra, dict) else None
-                if isinstance(n_from_extra, (int, np.integer)):
-                    return int(n_from_extra)
-                if isinstance(n_from_extra, str) and n_from_extra.isdigit():
-                    return int(n_from_extra)
-                n_from_problems = extra.get("num_problems", None) if isinstance(extra, dict) else None
-                if isinstance(n_from_problems, (int, np.integer)):
-                    return int(n_from_problems)
-                if isinstance(n_from_problems, str) and n_from_problems.isdigit():
-                    return int(n_from_problems)
-
-                reward_model = row.get("reward_model", {}) or {}
-                gt = reward_model.get("ground_truth", None) if isinstance(reward_model, dict) else None
-                if isinstance(gt, (list, tuple)):
-                    return len(gt)
-                return 1
-
-            self.dataframe = self.dataframe[self.dataframe.apply(lambda doc: _extract_n(doc) >= self.min_composed_query_num, axis=1)]
-            print(f'filter n>={self.min_composed_query_num} dataset len: {len(self.dataframe)}')
+            self.dataframe = self.dataframe[self.dataframe.apply(_keep, axis=1)]
+            hi = self.max_composed_query_num if self.max_composed_query_num is not None else "inf"
+            print(f'filter {self.min_composed_query_num} <= n <= {hi} dataset len: {len(self.dataframe)}')
 
         # filter out too long prompts
         tokenizer = self.tokenizer

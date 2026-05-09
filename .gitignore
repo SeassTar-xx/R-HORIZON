@@ -25,6 +25,8 @@ __pycache__/
 venv/
 .env
 .env.*
+*.secrets.env
+**/.env.*.local
 
 # --- IDE / 系统 ---
 .idea/

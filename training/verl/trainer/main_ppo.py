@@ -62,9 +62,8 @@ def run_ppo(config, compute_score=None):
 def main_task(config, compute_score=None):
     from verl.utils.fs import copy_local_path_from_hdfs
     # print initial config
-    from pprint import pprint
     from omegaconf import OmegaConf
-    pprint(OmegaConf.to_container(config, resolve=True))  # resolve=True will eval symbol values
+    # 勿 pprint 全量配置：含 LLM API Key，且日志会截断影响排障。
     OmegaConf.resolve(config)
 
     save_cfg = config.trainer.get('save_resolved_config_path', None)
