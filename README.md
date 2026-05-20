@@ -111,7 +111,7 @@ export TRAIN_DATA_DIR="./data"
 export OUTPUT_DIR="./checkpoints/process-aware-run"
 mkdir -p "$OUTPUT_DIR"
 
-ray start --head --port=29500 --num-gpus=8 --include-dashboard=false
+ray start --head --port=29500 --num-gpus=4 --include-dashboard=false
 
 ray job submit \
   --address "127.0.0.1:29500" \
@@ -124,14 +124,18 @@ ray job submit \
     data.val_files='["'"${TRAIN_DATA_DIR}/your_val.parquet"'"]' \
     actor_rollout_ref.model.path="${MODEL_PATH}" \
     trainer.default_local_dir="${OUTPUT_DIR}" \
-    trainer.n_gpus_per_node=8 \
+    trainer.n_gpus_per_node=4 \
     trainer.nnodes=1
 
 ray stop
 ```
 
-The default training configuration follows the experiment setting used in the
-paper draft:
+### Training Details
+
+All methods use the same data construction and inference settings. For
+reinforcement learning baselines, GRPO is used as the optimization framework,
+and these baselines differ only in reward design. The default training
+configuration follows the TRACE-RL experiment setting:
 
 - total training steps: `800`
 - actor learning rate: `5e-7`
@@ -141,6 +145,8 @@ paper draft:
 
 Here, batch size denotes the number of prompts used in each training step, while
 group size denotes the number of candidate responses sampled for each prompt.
+Experiments are conducted on NVIDIA RTX 4090 GPUs with 24GB memory, using
+gradient accumulation and group-wise rollout sampling to support GRPO training.
 
 The process-aware reward weights are configured in
 `training/verl/trainer/config/ppo_trainer.yaml`:
@@ -169,11 +175,15 @@ reward_model:
 
 trainer:
   total_training_steps: 800
+  n_gpus_per_node: 4
 ```
 
-The dense reward manager can use an OpenAI-compatible judge for selected process
-signals. If no judge API key is configured, local fallback heuristics are used so
-that all reward dimensions still produce valid scores.
+For the process-aware reward in TRACE-RL, the weights are set to `0.4`, `0.2`,
+`0.15`, `0.15`, and `0.1` for progression, complementarity, negation,
+consistency, and format rewards, respectively. For reward terms requiring
+semantic judgment, including complementarity, negation, consistency, and format
+clarity, DeepSeek is used as an OpenAI-compatible LLM judge with numeric-output
+prompts.
 
 ## Evaluation
 

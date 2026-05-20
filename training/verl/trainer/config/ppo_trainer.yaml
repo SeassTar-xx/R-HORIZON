@@ -23,7 +23,7 @@ actor_rollout_ref:
     override_config: { }
     enable_gradient_checkpointing: True
     use_remove_padding: False
-    # HF rollout需要分层 wrap，否则单卡 FSDP 扁平化整模会导致显存峰值 OOM
+    # Keep transformer-layer wrapping for stable FSDP memory behavior during HF rollout.
     keep_wrap_policy_for_hf: True
     use_liger: False
   actor:
@@ -76,7 +76,6 @@ actor_rollout_ref:
     log_prob_max_token_len_per_gpu: ${actor_rollout_ref.actor.ppo_max_token_len_per_gpu}
     ulysses_sequence_parallel_size: ${actor_rollout_ref.actor.ulysses_sequence_parallel_size} # sp size
   rollout:
-    # 当前环境自带 vLLM 不支持 Qwen3ForCausalLM；改为 HF 采样以保证训练可跑（不改变 lr/temperature/batch/n 等训练超参）。
     name: hf
     micro_batch_size: 2
     temperature: 0.8
@@ -181,7 +180,7 @@ reward_model:
     # Progress term: numeric / substring partial credit when exact match fails (see DenseChainRewardManager).
     progress_partial_credit: True
     enable_llm_judge: True
-    # 并发仅影响奖励侧 API 调用速度，不改变训练超参（lr/batch/n/temperature 等）
+    # DeepSeek is used as the numeric-output LLM judge for semantic reward terms.
     max_workers: 12
     base_url: https://api.deepseek.com/v1/chat/completions
     model_name: deepseek-chat
@@ -206,7 +205,6 @@ algorithm:
   use_online_passrate_filter: False # 新增：是否根据passrate结果实时对query进行过滤
 
 trainer:
-  # 单卡 24GB：train 前全量验证易 OOM；训练中 metrics/dense 日志仍按步记录。
   val_before_train: False
   rejection_sample: False # Reject sample prompts that all succeed or all fail (0 signal for GRPO due to normalization).
   rejection_sample_multiplier: 1 # Multiple the training batch size by this factor to account for rejection sampling reduction.
@@ -217,7 +215,7 @@ trainer:
   logger: [ 'console' ]
   val_generations_to_log_to_wandb: 0
   nnodes: 1
-  n_gpus_per_node: 1
+  n_gpus_per_node: 4
   save_freq: -1
   save_steps: [200, 300, 500, 600, 800]
   # On normal completion, save once more so weights after the last step are not skipped (independent of save_freq).
