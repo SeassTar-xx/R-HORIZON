@@ -1,8 +1,8 @@
 data:
   tokenizer: null
   # k=1/2/3/4 混合数据；训练时通过 min/max 仅保留 n∈[2,4]（排除 n=1）
-  train_files: ${oc.env:RH_DATA_DIR,/root/R-HORIZON/training/data}/combined_mixed_k1234_key_var_sd43_passrate0.25_skywork_or1_train_7b_math_key_variables_filtered.pkl
-  val_files: ${oc.env:RH_DATA_DIR,/root/R-HORIZON/training/data}/grpo_dense_tiny_val.parquet
+  train_files: ${oc.env:SL_DATA_DIR,/root/StepLink-RL/training/data}/combined_mixed_k1234_key_var_sd43_passrate0.25_skywork_or1_train_7b_math_key_variables_filtered.pkl
+  val_files: ${oc.env:SL_DATA_DIR,/root/StepLink-RL/training/data}/grpo_dense_tiny_val.parquet
   min_composed_query_num: 2
   max_composed_query_num: 4
   prompt_key: prompt
@@ -210,7 +210,7 @@ trainer:
   rejection_sample_multiplier: 1 # Multiple the training batch size by this factor to account for rejection sampling reduction.
   total_epochs: 30
   total_training_steps: 800
-  project_name: r_horizon
+  project_name: steplink_rl
   experiment_name: grpo_qwen3_4b_n234
   logger: [ 'console' ]
   val_generations_to_log_to_wandb: 0
@@ -226,8 +226,8 @@ trainer:
   test_freq: -1
   critic_warmup: 0
   default_hdfs_dir: null
-  default_local_dir: ${oc.env:RH_CKPT_DIR,/root/autodl-tmp/r_horizon_ckpts}/${trainer.project_name}/${trainer.experiment_name}
-  stats_path: ${oc.env:RH_STATS_DIR,/root/autodl-tmp/r_horizon_grpo_logs}/${trainer.experiment_name}
+  default_local_dir: ${oc.env:SL_CKPT_DIR,/root/autodl-tmp/steplink_rl_ckpts}/${trainer.project_name}/${trainer.experiment_name}
+  stats_path: ${oc.env:SL_STATS_DIR,/root/autodl-tmp/steplink_rl_grpo_logs}/${trainer.experiment_name}
   stats_save_freq: 1
   # 关闭训练中周期性 AIME jsonl 评测以提速（不改变 GRPO 训练超参）
   aime_eval_freq: 0
