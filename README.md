@@ -328,16 +328,3 @@ This repository currently focuses on mathematical long-horizon reasoning with
 Qwen-style causal language models and GRPO training. The implementation is still
 research-oriented: paths, data names, and launch parameters should be adjusted to
 your local cluster and dataset layout.
-
-## Citation
-
-If you use this project, please cite the paper draft:
-
-```bibtex
-@misc{xu2026steplinkrl,
-  title  = {StepLink-RL: Process-Aware Reward Shaping for Long-Horizon Reasoning},
-  author = {Xin Xu and Kunming Wu and Yuankai Wu},
-  year   = {2026},
-  note   = {Manuscript under review}
-}
-```
